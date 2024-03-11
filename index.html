@@ -1,3 +1,5 @@
+<!--index.html-->
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -8,13 +10,22 @@
 <body>
   <div class="container">
     <h1>Tarot Card Generator</h1>
-    <button id="drawButton">Draw a Card</button>
+    <div class="button-container">
+      <button id="drawButton">Draw a Card</button>
+      <select id="cardSelect">
+        <option value="">Select a Card</option>
+      </select>
+    </div>
     <div id="cardContainer">
       <img id="cardImage" src="" alt="Tarot Card">
       <h2>Card Text</h2>
       <div id="cardText"></div>
       <h2>Card Commentary</h2>
       <div id="cardCommentary"></div>
+      <div id="drawnCardsContainer">
+        <h2>Previously Drawn Cards</h2>
+        <ul id="drawnCardsList"></ul>
+      </div>
     </div>
   </div>
   <script src="cardData.js"></script>

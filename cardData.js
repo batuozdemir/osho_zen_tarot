@@ -316,3 +316,23 @@ const cardData = {
     "commentary": "This gentleman clearly thinks he's got it made. He sits in his big over-stuffed chair, wearing his sunglasses, shaded by his umbrella, with his pink slippers and his piña colada in his hand. He doesn't have the energy to get up and do anything because he thinks he's done it already. He hasn't yet turned to see the mirror cracking around him on his right, a sure sign that the place he thinks he's finally arrived at is about to shatter and dissolve before his very eyes. The message this card brings is that this poolside resort is not your final destination. The journey isn't over yet, as that white bird flying into the vastness of the sky is trying to show. Your complacency might have arisen from a real sense of achievement, but now it's time to move on. No matter how fuzzy the slippers, how tasty the piña colada, there are skies upon skies still waiting to be explored."
   }
 };
+
+
+const cardNames = [
+  "Aloneness", "Awareness", "Beyond Illusion", "Breakthrough", "Change",
+  "Conditioning", "Courage", "Creativity", "Existence", "Completion",
+  "Inner Voice", "Innocence", "Integration", "New Vision", "No-Thingness",
+  "Past Lives", "The Rebel", "Silence", "The Fool", "The Lovers",
+  "The Master", "Thunderbolt", "Transformation", "Comparison", "Consciousness",
+  "Control", "Fighting", "Guilt", "Ice-olation", "Mind",
+  "Morality", "Politics", "Postponement", "Rebirth", "Schizophrenia",
+  "Sorrow", "The Burden", "Exhaustion", "Experiencing", "Intensity",
+  "Participation", "Playfulness", "Possibilities", "Sharing", "Stress",
+  "Success", "Suppression", "The Creator", "The Source", "Totality",
+  "Traveling", "Abundance", "Adventure", "Compromise", "Flowering",
+  "Guidance", "Ripeness", "Moment To Moment", "Ordinariness", "Patience",
+  "Maturity", "Slowing Down", "The Miser", "The Outsider", "We Are The World",
+  "Celebration", "Clinging to the Past", "Friendliness", "Going With The Flow", "Harmony",
+  "Healing", "Letting Go", "Projections", "Receptivity", "The Dream",
+  "Trust", "Turning in", "Understanding", "Laziness"
+];
