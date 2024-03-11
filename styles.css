@@ -60,5 +60,20 @@ select {
 
 #drawnCardsList li.highlight {
   font-weight: bold;
-  color: blue;
 }
+
+.layout {
+  margin-bottom: 20px;
+}
+
+.layout img {
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 10px;
+}
+
+.layout p {
+  white-space: pre-wrap;
+  text-align: left;
+}
+
