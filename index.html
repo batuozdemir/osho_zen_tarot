@@ -1,55 +1,22 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Osho Zen Tarot</title>
+  <title>Tarot Card Generator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" type="text/css" href="styles.css">
 </head>
 <body>
   <div class="container">
-    <h1>Osho Zen Tarot</h1>
-    <div class="tab-container">
-      <div class="tab" data-tab="main">Main</div>
-      <div class="tab" data-tab="layouts">Layouts</div>
-      <div class="tab" data-tab="info">Info</div>
-    </div>
-    <div class="tab-content" id="main">
-      <div class="sidebar">
-        <button id="drawCard">Draw a Card</button>
-        <hr>
-        <h4>Previously Drawn Cards</h4>
-        <div id="previousCardsUI"></div>
-      </div>
-      <div class="main-content">
-        <div class="card-image-container">
-          <img id="cardImage" src="" alt="Card Image">
-        </div>
-        <div class="card-text-container">
-          <h4>Card Text</h4>
-          <div id="cardText"></div>
-          <h4>Card Commentary</h4>
-          <div id="cardCommentary"></div>
-        </div>
-      </div>
-    </div>
-    <div class="tab-content" id="layouts">
-      <div class="sidebar">
-        <div id="layoutSelectUI"></div>
-      </div>
-      <div class="main-content">
-        <div class="layout-image-container">
-          <img id="layoutImage" src="" alt="Layout Image">
-        </div>
-        <div class="layout-text-container">
-          <h4>Layout Explanation</h4>
-          <div id="layoutText"></div>
-        </div>
-      </div>
-    </div>
-    <div class="tab-content" id="info">
-      <!-- Add the content for the Info tab -->
+    <h1>Tarot Card Generator</h1>
+    <button id="drawButton">Draw a Card</button>
+    <div id="cardContainer">
+      <img id="cardImage" src="" alt="Tarot Card">
+      <h2>Card Text</h2>
+      <div id="cardText"></div>
+      <h2>Card Commentary</h2>
+      <div id="cardCommentary"></div>
     </div>
   </div>
-
-  <script src="app.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>
