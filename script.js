@@ -38,7 +38,8 @@ function displayCard(cardNumber) {
 function addToDrawnCards(cardNumber) {
   const drawnCardsList = document.getElementById('drawnCardsList');
   const listItem = document.createElement('li');
-  listItem.textContent = cardNames[cardNumber - 1];
+  const cardIndex = drawnCards.length + 1;
+  listItem.textContent = cardIndex + '- ' + cardNames[cardNumber - 1];
   listItem.addEventListener('click', function() {
     displayCard(cardNumber);
   });
@@ -75,5 +76,5 @@ cardSelect.addEventListener('change', function() {
 // Populate the dropdown menu and draw a random card when the page loads
 window.addEventListener('load', function() {
   populateCardSelect();
-  drawRandomCard();
+  
 });
