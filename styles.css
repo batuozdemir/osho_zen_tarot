@@ -10,6 +10,8 @@ body {
   text-align: center;
   margin: 0;
   padding: 20px;
+  background-color: #1A1A1A;
+  color: #DCDCDC;
 }
 
 .container {
@@ -25,11 +27,11 @@ body {
 }
 
 button {
-  padding: 12px 24px;
-  font-size: 18px;
+  padding: 24px 80px;
+  font-size: 32px;
   margin-bottom: 10px;
-  background-color: #8B0000;
-  color: #FFF;
+  background-color: #5A0000;
+  color: #DCDCDC;
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -39,16 +41,16 @@ button {
 }
 
 button:hover {
-  background-color: #B22222;
+  background-color: #901B1B;
 }
 
 select {
   margin-bottom: 10px;
-  padding: 10px;
-  font-size: 16px;
-  border: 1px solid #8B0000;
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #5A0000;
   border-radius: 4px;
-  background-color: #FFF;
+  background-color: #DCDCDC;
   color: #333;
   cursor: pointer;
   font-family: 'EBGaramond', serif;
