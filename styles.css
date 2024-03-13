@@ -1,7 +1,12 @@
 /*styles.css*/
 
+@font-face {
+  font-family: 'EBGaramond';
+  src: url('EBGaramond.ttf') format('truetype');
+}
+
 body {
-  font-family: Arial, sans-serif;
+  font-family: 'EBGaramond', serif;
   text-align: center;
   margin: 0;
   padding: 20px;
@@ -20,13 +25,33 @@ body {
 }
 
 button {
-  padding: 20px 40px;
-  font-size: 24px;
-  margin-bottom: 20px;
+  padding: 12px 24px;
+  font-size: 18px;
+  margin-bottom: 10px;
+  background-color: #8B0000;
+  color: #FFF;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  font-family: 'EBGaramond', serif;
+  font-weight: bold;
+}
+
+button:hover {
+  background-color: #B22222;
 }
 
 select {
   margin-bottom: 10px;
+  padding: 10px;
+  font-size: 16px;
+  border: 1px solid #8B0000;
+  border-radius: 4px;
+  background-color: #FFF;
+  color: #333;
+  cursor: pointer;
+  font-family: 'EBGaramond', serif;
 }
 
 #cardContainer {
