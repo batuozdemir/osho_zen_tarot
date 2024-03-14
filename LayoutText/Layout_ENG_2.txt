@@ -27,11 +27,11 @@ Option 1, Option 2, Option 3
 What I think, What I feel, What I do
 
 Foundational Spreads:
-Given your *strengths* and *weaknesses*, this is my *advice*.
-Given *what worked well*, and *what didn’t work well*, this is the *key lesson*.
-Given that *this brings you together*, and that *this pulls you apart*, you must *focus on this*.
-Given that *you want this from the relationship*, and *your partner wants this*, *your relationship is heading towards this*.
-Given *Option 1* and *Option 2*, This is *what you need to know to make a decision*.
+Given your <b><i>strengths</i></b> and <b><i>weaknesses</i></b>, this is my <b><i>advice</i></b>.
+Given <b><i>what worked well</i></b>, and <b><i>what didn’t work well</i></b>, this is the <b><i>key lesson</i></b>.
+Given that <b><i>this brings you together</i></b>, and that <b><i>this pulls you apart</i></b>, you must <b><i>focus on this</i></b>.
+Given that <b><i>you want this from the relationship</i></b>, and <b><i>your partner wants this</i></b>, <b><i>your relationship is heading towards this</i></b>.
+Given <b><i>Option 1</i></b> and <b><i>Option 2</i></b>, This is <b><i>what you need to know to make a decision</i></b>.
 
 Crossed Spreads:
 Situation, Obstacle, Advice
