@@ -6,7 +6,7 @@ const outputFile = 'cardData.txt';
 
 // Read layout text files
 const layoutTextData = {};
-for (let i = 1; i <= 9; i++) {
+for (let i = 1; i <= 13; i++) {
   const file = `Layout_ENG_${i}.txt`;
   const layoutText = fs.readFileSync(path.join(layoutTextFolder, file), 'utf8');
   layoutTextData[i] = layoutText.trim();
