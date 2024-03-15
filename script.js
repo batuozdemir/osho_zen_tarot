@@ -17,11 +17,18 @@ function populateCardSelect() {
   }
 }
 
+// Function to show Previously Drawn Cards title
+function showDrawnCardsTitle() {
+  const drawnCardsTitle = document.querySelector('#drawnCardsContainer h2');
+  drawnCardsTitle.style.display = 'block';
+}
+
 // Function to draw a random card
 function drawRandomCard() {
   const randomCard = Math.floor(Math.random() * totalCards) + 1;
   displayCard(randomCard);
   addToDrawnCards(randomCard);
+  showDrawnCardsTitle();
 }
 
 // Function to display a specific card
@@ -77,4 +84,11 @@ cardSelect.addEventListener('change', function() {
 window.addEventListener('load', function() {
   populateCardSelect();
   
+});
+
+// Hide the "Previously Drawn Cards" title when the page loads
+window.addEventListener('load', function() {
+  const drawnCardsTitle = document.querySelector('#drawnCardsContainer h2');
+  drawnCardsTitle.style.display = 'none';
+  populateCardSelect();
 });
