@@ -15,7 +15,7 @@
     <h1>Osho Zen Tarot</h1>
     <div class="button-container">
       <button id="drawButton">Draw</button>
-      <button id="headsOrTailsButton">Heads/Tails</button>
+      <button id="headsOrTailsButton">Heads or Tails</button>
     </div>
     <div id="headsOrTailsContainer">
       <button id="goBackButton">Go back</button>
@@ -320,22 +320,26 @@ const footer = document.querySelector('footer');
 // Function to handle the "Heads/Tails" button click event
 function handleHeadsOrTailsClick() {
   const result = Math.random() < 0.5 ? 'heads' : 'tails';
-  const resultElement = document.querySelector('#headsOrTailsContainer img');
-  
-  if (resultElement) {
-    resultElement.src = `assets/coinflip/${result}.png`;
-  } else {
-    const newResultElement = document.createElement('img');
-    newResultElement.src = `assets/coinflip/${result}.png`;
-    newResultElement.style.height = '150px';
-    newResultElement.style.display = 'block';
-    newResultElement.style.margin = '0 auto';
-    headsOrTailsContainer.insertBefore(newResultElement, goBackButton);
+  let resultElement = document.querySelector('#headsOrTailsContainer img');
+  if (!resultElement) {
+    resultElement = document.createElement('img');
+    resultElement.style.height = '200px';
+    resultElement.style.display = 'block';
+    resultElement.style.margin = '0 auto';
+    headsOrTailsContainer.insertBefore(resultElement, goBackButton);
   }
-  
-  headsOrTailsContainer.style.display = 'block';
-  cardContainer.style.display = 'none';
-  footer.classList.add('hidden');
+
+  if (headsOrTailsContainer.style.display === 'block') {
+    resultElement.src = 'assets/coinflip/pause.png';
+    setTimeout(() => {
+      resultElement.src = `assets/coinflip/${result}.png`;
+    }, 300);
+  } else {
+    resultElement.src = `assets/coinflip/${result}.png`;
+    headsOrTailsContainer.style.display = 'block';
+    cardContainer.style.display = 'none';
+    footer.classList.add('hidden');
+  }
 }
 
 

@@ -145,3 +145,18 @@ function handleGoBackClick() {
 
 // Add event listener to the "Go back" button
 goBackButton.addEventListener('click', handleGoBackClick);
+
+// Pre-download the coin flip images
+const coinImages = ['heads.png', 'tails.png', 'pause.png'];
+const preloadedImages = [];
+
+function preloadImages() {
+  coinImages.forEach(image => {
+    const img = new Image();
+    img.src = `assets/coinflip/${image}`;
+    preloadedImages.push(img);
+  });
+}
+
+// Call the preloadImages function when the page loads
+window.addEventListener('load', preloadImages);
