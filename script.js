@@ -108,7 +108,6 @@ const footer = document.querySelector('footer');
 function handleHeadsOrTailsClick() {
   const result = Math.random() < 0.5 ? 'heads' : 'tails';
   let resultElement = document.querySelector('#headsOrTailsContainer img');
-
   if (!resultElement) {
     resultElement = document.createElement('img');
     resultElement.style.height = '200px';
@@ -117,15 +116,17 @@ function handleHeadsOrTailsClick() {
     headsOrTailsContainer.insertBefore(resultElement, goBackButton);
   }
 
-  resultElement.src = 'assets/coinflip/pause.png';
-
-  headsOrTailsContainer.style.display = 'block';
-  cardContainer.style.display = 'none';
-  footer.classList.add('hidden');
-
-  setTimeout(() => {
+  if (headsOrTailsContainer.style.display === 'block') {
+    resultElement.src = 'assets/coinflip/pause.png';
+    setTimeout(() => {
+      resultElement.src = `assets/coinflip/${result}.png`;
+    }, 300);
+  } else {
     resultElement.src = `assets/coinflip/${result}.png`;
-  }, 300);
+    headsOrTailsContainer.style.display = 'block';
+    cardContainer.style.display = 'none';
+    footer.classList.add('hidden');
+  }
 }
 
 
