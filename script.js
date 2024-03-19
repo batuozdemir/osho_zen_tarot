@@ -36,7 +36,7 @@ function drawRandomCard() {
 
 // Function to display a specific card
 function displayCard(cardNumber) {
-  const imagePath = `CardPictures/card_${cardNumber}.jpg`;
+  const imagePath = `assets/CardPictures/card_${cardNumber}.jpg`;
   cardImage.src = imagePath;
   cardText.textContent = cardData[cardNumber].text;
   cardCommentary.textContent = cardData[cardNumber].commentary;
@@ -107,22 +107,25 @@ const footer = document.querySelector('footer');
 // Function to handle the "Heads/Tails" button click event
 function handleHeadsOrTailsClick() {
   const result = Math.random() < 0.5 ? 'heads' : 'tails';
-  const resultElement = document.querySelector('#headsOrTailsContainer img');
-  
-  if (resultElement) {
-    resultElement.src = `assets/${result}.png`;
-  } else {
-    const newResultElement = document.createElement('img');
-    newResultElement.src = `assets/${result}.png`;
-    newResultElement.style.height = '150px';
-    newResultElement.style.display = 'block';
-    newResultElement.style.margin = '0 auto';
-    headsOrTailsContainer.insertBefore(newResultElement, goBackButton);
+  let resultElement = document.querySelector('#headsOrTailsContainer img');
+
+  if (!resultElement) {
+    resultElement = document.createElement('img');
+    resultElement.style.height = '150px';
+    resultElement.style.display = 'block';
+    resultElement.style.margin = '0 auto';
+    headsOrTailsContainer.insertBefore(resultElement, goBackButton);
   }
-  
+
+  resultElement.src = 'assets/coinflip/pause.png';
+
   headsOrTailsContainer.style.display = 'block';
   cardContainer.style.display = 'none';
   footer.classList.add('hidden');
+
+  setTimeout(() => {
+    resultElement.src = `assets/coinflip/${result}.png`;
+  }, 300);
 }
 
 
