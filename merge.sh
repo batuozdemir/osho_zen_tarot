@@ -1,0 +1,1 @@
+cat index.html styles.css script.js > merged.txt
