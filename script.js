@@ -106,14 +106,17 @@ const footer = document.querySelector('footer');
 
 // Function to handle the "Heads/Tails" button click event
 function handleHeadsOrTailsClick() {
-  const result = Math.random() < 0.5 ? 'Heads!' : 'Tails!';
-  const resultElement = document.querySelector('#headsOrTailsContainer h2');
+  const result = Math.random() < 0.5 ? 'heads' : 'tails';
+  const resultElement = document.querySelector('#headsOrTailsContainer img');
   
   if (resultElement) {
-    resultElement.textContent = result;
+    resultElement.src = `assets/${result}.png`;
   } else {
-    const newResultElement = document.createElement('h2');
-    newResultElement.textContent = result;
+    const newResultElement = document.createElement('img');
+    newResultElement.src = `assets/${result}.png`;
+    newResultElement.style.height = '150px';
+    newResultElement.style.display = 'block';
+    newResultElement.style.margin = '0 auto';
     headsOrTailsContainer.insertBefore(newResultElement, goBackButton);
   }
   
