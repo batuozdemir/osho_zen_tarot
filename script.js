@@ -111,7 +111,7 @@ function handleHeadsOrTailsClick() {
 
   if (!resultElement) {
     resultElement = document.createElement('img');
-    resultElement.style.height = '150px';
+    resultElement.style.height = '200px';
     resultElement.style.display = 'block';
     resultElement.style.margin = '0 auto';
     headsOrTailsContainer.insertBefore(resultElement, goBackButton);
