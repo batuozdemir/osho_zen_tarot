@@ -3,7 +3,7 @@ const layoutContainer = document.getElementById('layoutContainer');
 // Function to display layout details
 function displayLayout(layoutNumber) {
   const layoutText = layoutData[layoutNumber];
-  const imagePath = `ReadingLayouts/layout_${layoutNumber}.jpg`;
+  const imagePath = `assets/ReadingLayouts/layout_${layoutNumber}.png`;
 
   const layoutElement = document.createElement('div');
   layoutElement.classList.add('layout');
