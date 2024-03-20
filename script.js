@@ -74,8 +74,22 @@ function highlightDrawnCard(cardNumber) {
   }
 }
 
+// Function to track button clicks using GoatCounter
+function trackButtonClick(buttonName) {
+  if (typeof goatcounter !== 'undefined' && goatcounter.count) {
+    goatcounter.count({
+      path: buttonName,
+      title: buttonName,
+      event: true,
+    });
+  }
+}
+
 // Draw a random card when the button is clicked
-drawButton.addEventListener('click', drawRandomCard);
+drawButton.addEventListener('click', function() {
+  drawRandomCard();
+  trackButtonClick('Draw Button');
+});
 
 // Display the selected card when the dropdown value changes
 cardSelect.addEventListener('change', function() {
@@ -132,9 +146,11 @@ function handleHeadsOrTailsClick() {
 }
 
 
-
 // Add event listener to the "Heads/Tails" button
-headsOrTailsButton.addEventListener('click', handleHeadsOrTailsClick);
+headsOrTailsButton.addEventListener('click', function() {
+  handleHeadsOrTailsClick();
+  trackButtonClick('Heads or Tails Button');
+});
 
 const goBackButton = document.getElementById('goBackButton');
 
