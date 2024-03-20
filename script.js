@@ -1,3 +1,5 @@
+//Script.js
+
 const drawButton = document.getElementById('drawButton');
 const cardSelect = document.getElementById('cardSelect');
 const cardContainer = document.getElementById('cardContainer');
@@ -138,9 +140,19 @@ const goBackButton = document.getElementById('goBackButton');
 
 // Function to handle the "Go back" button click event
 function handleGoBackClick() {
-  headsOrTailsContainer.style.display = 'none';
-  cardContainer.style.display = 'block';
-  footer.classList.remove('hidden');
+  if (drawnCards.length === 0) {
+    // If no card has been drawn, show the home screen
+    headsOrTailsContainer.style.display = 'none';
+    cardContainer.style.display = 'none';
+    drawButton.style.display = 'block';
+    headsOrTailsButton.style.display = 'block';
+    footer.classList.remove('hidden');
+  } else {
+    // If a card has been drawn, show the card container
+    headsOrTailsContainer.style.display = 'none';
+    cardContainer.style.display = 'block';
+    footer.classList.remove('hidden');
+  }
 }
 
 // Add event listener to the "Go back" button
