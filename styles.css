@@ -166,3 +166,8 @@ footer.hidden {
 #goBackButton:hover {
   background-color: #901B1B;
 }
+
+.layout-dropdown {
+  margin-bottom: 1000px; /* Adjust the value as needed */
+}
+
