@@ -57,9 +57,9 @@ layoutDropdown.addEventListener('change', function() {
 // Populate the dropdown menu and display a random layout when the page loads
 window.addEventListener('load', function() {
   populateDropdown();
-  const randomLayoutNumber = getRandomLayoutNumber();
-  displayLayout(randomLayoutNumber);
-  layoutDropdown.value = randomLayoutNumber;
+  // const randomLayoutNumber = getRandomLayoutNumber();
+  // displayLayout(randomLayoutNumber);
+  // layoutDropdown.value = randomLayoutNumber;
 });
 
 // Function to select a random layout number
@@ -74,11 +74,10 @@ layoutDropdown.addEventListener('change', function() {
   displayLayout(selectedLayout);
 });
 
-// Populate the dropdown menu and display a random layout when the page loads
-window.addEventListener('load', function() {
-  populateDropdown();
+const randomButton = document.getElementById('randomButton');
+
+randomButton.addEventListener('click', function() {
   const randomLayoutNumber = getRandomLayoutNumber();
   displayLayout(randomLayoutNumber);
   layoutDropdown.value = randomLayoutNumber;
 });
-
