@@ -1,3 +1,5 @@
+//layoutscript.js
+
 const layoutDropdown = document.getElementById('layoutDropdown');
 const layoutContainer = document.getElementById('layoutContainer');
 

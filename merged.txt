@@ -1,0 +1,518 @@
+<!--index.html-->
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Osho Zen Tarot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" type="text/css" href="styles.css">
+  <link rel="icon" href="assets/favicon.ico" type="image/x-icon">
+  <link rel="shortcut icon" href="assets/favicon.ico" type="image/x-icon">
+</head>
+<body>
+  <div class="container">
+    <h1>Osho Zen Tarot</h1>
+    <div class="button-container">
+      <button id="drawButton" data-goatcounter-click="Draw Button">Draw</button>
+      <button id="headsOrTailsButton" data-goatcounter-click="Heads or Tails Button">Heads or Tails</button>
+    </div>
+    <div id="headsOrTailsContainer">
+      <button id="goBackButton">Go back</button>
+    </div>
+    <div id="cardContainer">
+      <img id="cardImage" src="" alt="Tarot Card">
+      <h2>Card Text</h2>
+      <div id="cardText"></div>
+      <h2>Card Commentary</h2>
+      <div id="cardCommentary"></div>
+      <div id="drawnCardsContainer">
+        <h2>Previously Drawn Cards</h2>
+        <ul id="drawnCardsList"></ul>
+      </div>
+    </div>
+  </div>
+  <footer>
+    <select id="cardSelect">
+      <option value="">Browse Cards</option>
+    </select>
+    <p></p>
+    <button class="small-button" onclick="window.location.href='layouts.html'">Card Layouts</button>
+  </footer>
+  <script src="js/cardData.js"></script>
+  <script src="script.js"></script>
+  <script data-goatcounter="https://osho-zen-tarot.goatcounter.com/count"
+  async src="//gc.zgo.at/count.js"></script>
+</body>
+</html>
+
+/*styles.css*/
+
+@font-face {
+  font-family: 'EBGaramond';
+  src: url('assets/EBGaramond.ttf') format('truetype');
+}
+
+body {
+  font-family: 'EBGaramond', serif;
+  text-align: center;
+  margin: 0;
+  padding: 20px;
+  background-color: #1A1A1A;
+  color: #DCDCDC;
+}
+
+.container {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.button-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+button {
+  padding: 24px 80px;
+  font-size: 32px;
+  margin-bottom: 10px;
+  background-color: #5A0000;
+  color: #DCDCDC;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  font-family: 'EBGaramond', serif;
+  font-weight: bold;
+}
+
+button:hover {
+  background-color: #901B1B;
+}
+
+select {
+  margin-bottom: 10px;
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #5A0000;
+  border-radius: 4px;
+  background-color: #DCDCDC;
+  color: #333;
+  cursor: pointer;
+  font-family: 'EBGaramond', serif;
+}
+
+#cardContainer {
+  display: none;
+}
+
+#cardImage {
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 20px;
+}
+
+#cardText, #cardCommentary {
+  white-space: pre-wrap;
+  text-align: left;
+}
+
+#drawnCardsContainer {
+  margin-top: 20px;
+}
+
+#drawnCardsList {
+  list-style-type: none;
+  padding: 0;
+}
+
+#drawnCardsList li {
+  cursor: pointer;
+  margin-bottom: 5px;
+}
+
+#drawnCardsList li.highlight {
+  font-weight: bold;
+}
+
+.layout {
+  margin-bottom: 20px;
+}
+
+.layout img {
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 10px;
+}
+
+.layout p {
+  white-space: pre-wrap;
+  text-align: left;
+}
+
+.small-button {
+  padding: 8px 16px;
+  font-size: 14px;
+  background-color: #5A0000;
+  color: #DCDCDC;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  font-family: 'EBGaramond', serif;
+  font-weight: bold;
+  margin-left: 10px;
+  }
+  
+  .small-button:hover {
+  background-color: #901B1B;
+  }
+
+  #headsOrTailsButton {
+    padding: 6px 60px;
+    font-size: 16px;
+    margin-bottom: 10px;
+    background-color: #5A0000;
+    color: #DCDCDC;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    font-family: 'EBGaramond', serif;
+    font-weight: bold;
+  }
+  
+  #headsOrTailsButton:hover {
+    background-color: #901B1B;
+  }
+
+  #cardContainer.hidden,
+footer.hidden {
+  display: none;
+}
+
+#headsOrTailsContainer {
+  display: none;
+}
+
+#goBackButton {
+  padding: 4px 20px;
+  font-size: 14px;
+  margin-top: 20px;
+  background-color: #5A0000;
+  color: #DCDCDC;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  font-family: 'EBGaramond', serif;
+  font-weight: bold;
+}
+
+#goBackButton:hover {
+  background-color: #901B1B;
+}
+
+.layout-dropdown {
+  margin-bottom: 1000px; /* Adjust the value as needed */
+}
+
+//Script.js
+
+const drawButton = document.getElementById('drawButton');
+const cardSelect = document.getElementById('cardSelect');
+const cardContainer = document.getElementById('cardContainer');
+const cardImage = document.getElementById('cardImage');
+const cardText = document.getElementById('cardText');
+const cardCommentary = document.getElementById('cardCommentary');
+const totalCards = 79;
+const drawnCards = [];
+
+// Populate the dropdown menu with card names
+function populateCardSelect() {
+  for (let i = 0; i < totalCards; i++) {
+    const option = document.createElement('option');
+    option.value = i + 1;
+    option.textContent = cardNames[i];
+    cardSelect.appendChild(option);
+  }
+}
+
+// Function to show Previously Drawn Cards title
+function showDrawnCardsTitle() {
+  const drawnCardsTitle = document.querySelector('#drawnCardsContainer h2');
+  drawnCardsTitle.style.display = 'block';
+}
+
+// Function to draw a random card
+function drawRandomCard() {
+  const randomCard = Math.floor(Math.random() * totalCards) + 1;
+  displayCard(randomCard);
+  addToDrawnCards(randomCard);
+  showDrawnCardsTitle();
+  headsOrTailsContainer.style.display = 'none';
+  cardContainer.style.display = 'block';
+  footer.classList.remove('hidden');
+}
+
+// Function to display a specific card
+function displayCard(cardNumber) {
+  const imagePath = `assets/CardPictures/card_${cardNumber}.jpg`;
+  cardImage.src = imagePath;
+  cardText.textContent = cardData[cardNumber].text;
+  cardCommentary.textContent = cardData[cardNumber].commentary;
+  headsOrTailsContainer.style.display = 'none';
+  cardContainer.style.display = 'block';
+  footer.classList.remove('hidden');
+  highlightDrawnCard(cardNumber);
+}
+
+// Function to add the drawn card to the list
+function addToDrawnCards(cardNumber) {
+  const drawnCardsList = document.getElementById('drawnCardsList');
+  const listItem = document.createElement('li');
+  const cardIndex = drawnCards.length + 1;
+  listItem.textContent = cardIndex + '- ' + cardNames[cardNumber - 1];
+  listItem.addEventListener('click', function() {
+    displayCard(cardNumber);
+  });
+  drawnCardsList.appendChild(listItem);
+  drawnCards.push(cardNumber);
+}
+
+// Function to highlight the clicked card in the list
+function highlightDrawnCard(cardNumber) {
+  const drawnCardsList = document.getElementById('drawnCardsList');
+  const listItems = drawnCardsList.getElementsByTagName('li');
+  for (let i = 0; i < listItems.length; i++) {
+    if (drawnCards[i] === cardNumber) {
+      listItems[i].classList.add('highlight');
+    } else {
+      listItems[i].classList.remove('highlight');
+    }
+  }
+}
+
+// Function to track button clicks using GoatCounter
+function trackButtonClick(buttonName) {
+  if (typeof goatcounter !== 'undefined' && goatcounter.count) {
+    goatcounter.count({
+      path: buttonName,
+      title: buttonName,
+      event: true,
+    });
+  }
+}
+
+// Draw a random card when the button is clicked
+drawButton.addEventListener('click', function() {
+  drawRandomCard();
+  trackButtonClick('Draw Button');
+});
+
+// Display the selected card when the dropdown value changes
+cardSelect.addEventListener('change', function() {
+  const selectedCard = parseInt(cardSelect.value);
+  if (selectedCard) {
+    displayCard(selectedCard);
+  } else {
+    cardContainer.style.display = 'none';
+    cardContainer.classList.add('hidden');
+  }
+});
+
+// Populate the dropdown menu and draw a random card when the page loads
+window.addEventListener('load', function() {
+  populateCardSelect();
+  
+});
+
+// Hide the "Previously Drawn Cards" title when the page loads
+window.addEventListener('load', function() {
+  const drawnCardsTitle = document.querySelector('#drawnCardsContainer h2');
+  drawnCardsTitle.style.display = 'none';
+  populateCardSelect();
+});
+
+const headsOrTailsContainer = document.getElementById('headsOrTailsContainer');
+
+const headsOrTailsButton = document.getElementById('headsOrTailsButton');
+const footer = document.querySelector('footer');
+
+// Function to handle the "Heads/Tails" button click event
+function handleHeadsOrTailsClick() {
+  const result = Math.random() < 0.5 ? 'heads' : 'tails';
+  let resultElement = document.querySelector('#headsOrTailsContainer img');
+  if (!resultElement) {
+    resultElement = document.createElement('img');
+    resultElement.style.height = '200px';
+    resultElement.style.display = 'block';
+    resultElement.style.margin = '0 auto';
+    headsOrTailsContainer.insertBefore(resultElement, goBackButton);
+  }
+
+  if (headsOrTailsContainer.style.display === 'block') {
+    resultElement.src = 'assets/coinflip/pause.png';
+    setTimeout(() => {
+      resultElement.src = `assets/coinflip/${result}.png`;
+    }, 300);
+  } else {
+    resultElement.src = `assets/coinflip/${result}.png`;
+    headsOrTailsContainer.style.display = 'block';
+    cardContainer.style.display = 'none';
+    footer.classList.add('hidden');
+  }
+}
+
+
+// Add event listener to the "Heads/Tails" button
+headsOrTailsButton.addEventListener('click', function() {
+  handleHeadsOrTailsClick();
+  trackButtonClick('Heads or Tails Button');
+});
+
+const goBackButton = document.getElementById('goBackButton');
+
+// Function to handle the "Go back" button click event
+function handleGoBackClick() {
+  if (drawnCards.length === 0) {
+    // If no card has been drawn, show the home screen
+    headsOrTailsContainer.style.display = 'none';
+    cardContainer.style.display = 'none';
+    drawButton.style.display = 'block';
+    headsOrTailsButton.style.display = 'block';
+    footer.classList.remove('hidden');
+  } else {
+    // If a card has been drawn, show the card container
+    headsOrTailsContainer.style.display = 'none';
+    cardContainer.style.display = 'block';
+    footer.classList.remove('hidden');
+  }
+}
+
+// Add event listener to the "Go back" button
+goBackButton.addEventListener('click', handleGoBackClick);
+
+// Pre-download the coin flip images
+const coinImages = ['heads.png', 'tails.png', 'pause.png'];
+const preloadedImages = [];
+
+function preloadImages() {
+  coinImages.forEach(image => {
+    const img = new Image();
+    img.src = `assets/coinflip/${image}`;
+    preloadedImages.push(img);
+  });
+}
+
+// Call the preloadImages function when the page loads
+window.addEventListener('load', preloadImages);
+<!--layouts.html-->
+
+<!DOCTYPE html>
+<html>
+<head>
+<title>Card Spreads</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" type="text/css" href="styles.css">
+</head>
+<body>
+<div class="container">
+<h1>Card Spreads</h1>
+<button id="randomButton">Random</button>
+<p></p>
+<select id="layoutDropdown"></select>
+<p></p>
+<div id="layoutContainer"></div>
+</div>
+<script src="layoutData.js"></script>
+<script src="layoutScript.js"></script>
+<button class="small-button" onclick="window.location.href='index.html'">Go back</button>
+</body>
+</html>//layoutscript.js
+
+const layoutDropdown = document.getElementById('layoutDropdown');
+const layoutContainer = document.getElementById('layoutContainer');
+
+// Function to display layout details
+function displayLayout(layoutNumber) {
+layoutContainer.innerHTML = ''; // Clear previous layout
+
+const layoutText = layoutData[layoutNumber];
+const imagePath = `assets/ReadingLayouts/layout_${layoutNumber}.png`;
+const layoutElement = document.createElement('div');
+layoutElement.classList.add('layout');
+
+const imageElement = document.createElement('img');
+imageElement.src = imagePath;
+imageElement.alt = `Layout ${layoutNumber}`;
+layoutElement.appendChild(imageElement);
+
+// Split the layout text by newline characters
+const lines = layoutText.split('\n');
+// Extract the first line as the title
+const titleElement = document.createElement('h2');
+titleElement.textContent = lines[0];
+layoutElement.appendChild(titleElement);
+
+// Join the remaining lines as the description
+const descriptionElement = document.createElement('p');
+descriptionElement.innerHTML = lines.slice(1).join('<br>');
+layoutElement.appendChild(descriptionElement);
+
+// Add two line breaks after the layout text
+const lineBreaks = document.createElement('div');
+lineBreaks.innerHTML = '<br><br>';
+layoutElement.appendChild(lineBreaks);
+
+layoutContainer.appendChild(layoutElement);
+}
+
+// Populate the dropdown menu with layout options
+function populateDropdown() {
+  for (let i = 1; i <= Object.keys(layoutData).length; i++) {
+    const layoutText = layoutData[i.toString()];
+    const lines = layoutText.split('\n');
+    const layoutName = lines[0];
+    const option = document.createElement('option');
+    option.value = i.toString();
+    option.textContent = layoutName;
+    layoutDropdown.appendChild(option);
+  }
+}
+
+// Event listener for dropdown selection change
+layoutDropdown.addEventListener('change', function() {
+  const selectedLayout = layoutDropdown.value;
+  displayLayout(selectedLayout);
+});
+
+// Populate the dropdown menu and display a random layout when the page loads
+window.addEventListener('load', function() {
+  populateDropdown();
+  // const randomLayoutNumber = getRandomLayoutNumber();
+  // displayLayout(randomLayoutNumber);
+  // layoutDropdown.value = randomLayoutNumber;
+});
+
+// Function to select a random layout number
+function getRandomLayoutNumber() {
+  const layoutCount = Object.keys(layoutData).length;
+  return Math.floor(Math.random() * layoutCount) + 1;
+}
+
+// Event listener for dropdown selection change
+layoutDropdown.addEventListener('change', function() {
+  const selectedLayout = layoutDropdown.value;
+  displayLayout(selectedLayout);
+});
+
+const randomButton = document.getElementById('randomButton');
+
+randomButton.addEventListener('click', function() {
+  const randomLayoutNumber = getRandomLayoutNumber();
+  displayLayout(randomLayoutNumber);
+  layoutDropdown.value = randomLayoutNumber;
+});

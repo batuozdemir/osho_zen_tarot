@@ -1,1 +1,1 @@
-cat index.html styles.css script.js > merged.txt
+cat index.html styles.css script.js layouts.html layoutScript.js > merged.txt
