@@ -2,6 +2,12 @@
 
 const layoutDropdown = document.getElementById('layoutDropdown');
 const layoutContainer = document.getElementById('layoutContainer');
+const cardSpreadsHeader = document.querySelector('.card-spreads-header');
+const cardSpreadsContainer = cardSpreadsHeader.parentElement;
+
+cardSpreadsHeader.addEventListener('click', () => {
+  cardSpreadsContainer.classList.toggle('expanded');
+});
 
 // Function to display layout details
 function displayLayout(layoutNumber) {

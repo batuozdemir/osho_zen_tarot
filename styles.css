@@ -171,3 +171,31 @@ footer.hidden {
   margin-bottom: 1000px; /* Adjust the value as needed */
 }
 
+.card-spreads-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+
+.card-spreads-header h5 {
+  margin: 0;
+}
+
+.arrow {
+  margin-left: 5px;
+  transition: transform 0.3s;
+}
+
+.card-spreads-content {
+  display: none;
+  padding-top: 10px;
+}
+
+.expanded .arrow {
+  transform: rotate(180deg);
+}
+
+.expanded .card-spreads-content {
+  display: block;
+}

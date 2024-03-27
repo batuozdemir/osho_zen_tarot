@@ -14,6 +14,9 @@
   <div class="container">
     <h1>Osho Zen Tarot</h1>
     <div class="button-container">
+      <select id="cardSelect">
+        <option value="">Browse Cards</option>
+      </select>
       <button id="drawButton" data-goatcounter-click="Draw Button">Draw</button>
       <button id="headsOrTailsButton" data-goatcounter-click="Heads or Tails Button">Heads or Tails</button>
     </div>
@@ -31,16 +34,29 @@
         <ul id="drawnCardsList"></ul>
       </div>
     </div>
+    <div class="container">
+      <div class="card-spreads-header">
+        <h5>Card Spreads</h5>
+        <span class="arrow">&#9660;</span>
+      </div>
+      <div class="card-spreads-content">
+        <select id="layoutDropdown">
+          <option value="">Browse Layouts</option>
+        </select>
+        <button class="small-button" id="randomButton">Random</button>
+        <p></p>
+        <p></p>
+        <div id="layoutContainer"></div>
+      </div>
+    </div>
   </div>
   <footer>
-    <select id="cardSelect">
-      <option value="">Browse Cards</option>
-    </select>
-    <p></p>
-    <button class="small-button" onclick="window.location.href='layouts.html'">Card Layouts</button>
+    
   </footer>
   <script src="js/cardData.js"></script>
   <script src="script.js"></script>
+  <script src="layoutData.js"></script>
+  <script src="layoutScript.js"></script>
   <script data-goatcounter="https://osho-zen-tarot.goatcounter.com/count"
   async src="//gc.zgo.at/count.js"></script>
 </body>
