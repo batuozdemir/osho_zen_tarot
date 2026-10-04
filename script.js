@@ -332,9 +332,22 @@ function localReadings() {
   try { return JSON.parse(localStorage.getItem(LOCAL_STORE)) || []; } catch { return []; }
 }
 
+// No count limit: only one unfinished reading is ever kept, and finished ones must not be
+// dropped before they reach the journal.
 function storeLocal(list) {
-  try { localStorage.setItem(LOCAL_STORE, JSON.stringify(list.slice(0, 12))); } catch {}
+  try {
+    localStorage.setItem(LOCAL_STORE, JSON.stringify(list));
+    return true;
+  } catch {
+    return false;
+  }
 }
+
+// Kept readings whose save is in flight in this page, counted per key, so the home list
+// and the startup flush leave them alone and nothing posts the same reading twice.
+const savingKeys = new Map();
+const claim = key => savingKeys.set(key, (savingKeys.get(key) || 0) + 1);
+const release = key => (savingKeys.get(key) > 1 ? savingKeys.set(key, savingKeys.get(key) - 1) : savingKeys.delete(key));
 
 function dropLocal(key) {
   storeLocal(localReadings().filter(e => e.key !== key));
@@ -370,12 +383,24 @@ function keepLocal() {
       question: $('question').value, impression: $('impression').value, drawnAt, at: new Date().toISOString(),
     });
   }
-  storeLocal(list);
+  if (!storeLocal(list) && done && journalOrigin && !readingId && !keepLocal.warned) {
+    keepLocal.warned = true;
+    toast('This reading could not be kept on this device.');
+  }
 }
 
 function resumeLocal(e) {
+  // A home-list button can outlive its entry: re-read it, so a reading that was saved or
+  // discarded meanwhile is not opened (and saved) a second time.
+  const stored = localReadings().find(x => x.key === e?.key);
+  if (!stored || savingKeys.has(e.key)) {
+    if (stored) toast('This reading is being saved to your journal.');
+    if (!$('pickerView').hidden) renderLocal();
+    return;
+  }
+  e = stored;
   if (!validEntry(e)) {
-    dropLocal(e?.key);
+    dropLocal(e.key);
     return showHome();
   }
   beginTransition();
@@ -399,9 +424,13 @@ function resumeLocal(e) {
 async function saveKeptReadings() {
   if (!server.on) return;
   let saved = 0;
-  for (const e of localReadings()) {
-    if (e.key === localKey || !validEntry(e) || !entryDone(e)) continue;
-    dropLocal(e.key);  // claimed, so the home list cannot open it while it saves
+  for (const { key } of localReadings()) {
+    // Read again each time: one may have been discarded or opened while another saved.
+    const e = localReadings().find(x => x.key === key);
+    if (!e || e.key === localKey || savingKeys.has(e.key) || !validEntry(e) || !entryDone(e)) continue;
+    // The entry stays stored until the journal confirms it; only this page's claim hides it.
+    claim(e.key);
+    if (!$('pickerView').hidden) renderLocal();
     const s = spreads.find(sp => sp.id === e.spread);
     const at = e.drawnAt || e.at;
     try {
@@ -413,22 +442,24 @@ async function saveKeptReadings() {
           summary: readingText({ spread: s, variant: e.variant, cards: e.placed, question: e.question, impression: e.impression, date: at }),
         }),
       });
+      dropLocal(e.key);
       saved++;
     } catch {
-      storeLocal([...localReadings(), e]);
       break;
+    } finally {
+      release(e.key);
     }
   }
+  if (!$('pickerView').hidden) renderLocal();
   if (!saved) return;
   toast(saved === 1 ? 'A reading kept on this device was saved to your journal.' : `${saved} readings kept on this device were saved to your journal.`);
-  if (!$('pickerView').hidden) renderLocal();
   if (location.hash === '#journal') showJournal(true);
 }
 
 function renderLocal() {
   const list = $('localList');
   list.replaceChildren();
-  const entries = localReadings().filter(validEntry);
+  const entries = localReadings().filter(e => validEntry(e) && !savingKeys.has(e.key));
   $('localBlock').hidden = !entries.length;
   entries.forEach(e => {
     const s = spreads.find(sp => sp.id === e.spread);
@@ -693,7 +724,7 @@ function update() {
   $('impressionField').hidden = !done;
   $('copyButton').disabled = !done;
   $('linkButton').disabled = !done;
-  $('undoButton').disabled = placed.length === 0 || flying || !!interpretation ||
+  $('undoButton').disabled = placed.length === 0 || flying || !!interpretation || notes.length > 0 || addingNote ||
     (readingId && !ownReading) || (isParadox() && placed.length <= 2);
   history.replaceState(null, '', done ? `#${shareHash()}` : spreadHash());
   keepLocal();
@@ -914,7 +945,8 @@ function place(cardEl) {
 }
 
 function undo() {
-  if (flying || placed.length === 0 || interpretation || (readingId && !ownReading)) return;
+  // Once Claude or Batu has written about the saved reading, its cards are final.
+  if (flying || placed.length === 0 || interpretation || notes.length || addingNote || (readingId && !ownReading)) return;
   if (readingId) discardSaved();
   if (pendingSave) pendingSave.cancelled = true;
   pendingSave = null;
@@ -1008,6 +1040,7 @@ async function saveReading() {
   saving = true;
   saveFailed = false;
   update();
+  if (key) claim(key);
   let r;
   try {
     r = await api('readings', {
@@ -1018,8 +1051,12 @@ async function saveReading() {
       }),
     });
   } catch {
+    if (key) release(key);
     if (pendingSave === job) pendingSave = null;
-    if (!isCurrent(g)) return;
+    if (!isCurrent(g)) {
+      if (!$('pickerView').hidden) renderLocal();
+      return;
+    }
     saving = false;
     saveFailed = true;
     update();
@@ -1027,6 +1064,7 @@ async function saveReading() {
     return;
   }
   if (pendingSave === job) pendingSave = null;
+  if (key) release(key);
   // Undone while saving: the row describes a reading that no longer exists. Try twice,
   // since a lost delete would leave a stray entry in the journal.
   if (job.cancelled) {
@@ -1116,6 +1154,7 @@ async function loadReading(id) {
   }
   $('question').value = r.question;
   $('impression').value = r.impression || '';
+  drawnAt = r.created_at;
   interpretation = r.interpretation ? { text: r.interpretation, at: r.interpreted_at } : null;
   earlier = r.earlier || [];
   notes = r.notes || [];
@@ -1168,7 +1207,7 @@ function renderInterpretation() {
   $('interpretationText').innerHTML = renderMarkdown(interpretation.text);
   // Rebuilt only when it changes, so an open "Earlier version" stays open.
   const versions = $('earlierVersions');
-  const key = earlier.map(e => e.interpreted_at).join('|');
+  const key = JSON.stringify([readingId, earlier]);
   if (versions.dataset.key === key) return;
   versions.dataset.key = key;
   versions.replaceChildren(...earlier.map(e => {
@@ -1184,6 +1223,7 @@ function renderInterpretation() {
 // ---------- coming back to a reading ----------
 
 let notePrompt = '';
+let addingNote = false;
 
 function setNotePrompt(prompt) {
   notePrompt = prompt;
@@ -1211,19 +1251,25 @@ function renderNotes() {
 async function addNote() {
   const text = $('noteText').value.trim();
   if (!text || !readingId) return;
-  const g = gen, id = readingId;
+  const g = gen, id = readingId, prompt = notePrompt;
   $('noteSave').disabled = true;
+  addingNote = true;
+  update();
   try {
-    const n = await api(`readings/${id}/notes`, { method: 'POST', body: JSON.stringify({ prompt: notePrompt, text }) });
+    const n = await api(`readings/${id}/notes`, { method: 'POST', body: JSON.stringify({ prompt, text }) });
     if (!isCurrent(g) || readingId !== id) return;
     notes.push(n);
-    $('noteText').value = '';
-    setNotePrompt('');
-    renderNotes();
+    // Only what was sent is cleared; anything written while it saved stays.
+    if ($('noteText').value.trim() === text) {
+      $('noteText').value = '';
+      if (notePrompt === prompt) setNotePrompt('');
+    }
   } catch {
     if (isCurrent(g)) toast('Could not save the note.');
   } finally {
+    addingNote = false;
     $('noteSave').disabled = false;
+    if (isCurrent(g)) update();
   }
 }
 
