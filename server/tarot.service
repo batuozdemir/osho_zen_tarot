@@ -1,0 +1,29 @@
+[Unit]
+Description=tarot - Osho Zen Tarot site and journal, tailnet only
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tarot
+Group=tarot
+WorkingDirectory=/opt/tarot
+Environment=TAROT_SITE_DIR=/opt/tarot/site
+Environment=TAROT_DB=/var/lib/tarot/journal.db
+# Creates /var/lib/tarot owned by the service user, and keeps it across restarts.
+StateDirectory=tarot
+# Readings are personal: only the service user can read them.
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/opt/tarot/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8081
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

@@ -1,64 +1,184 @@
-<!--index.html-->
-
-
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Osho Zen Tarot</title>
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" type="text/css" href="styles.css">
+  <script>
+    // Relative URLs need a directory URL. Behind `tailscale serve --set-path /tarot`,
+    // /tarot would resolve every file at the root, so this must run before anything loads.
+    if (!location.pathname.endsWith('/') && !location.pathname.endsWith('.html')) {
+      location.replace(location.pathname + '/' + location.search + location.hash);
+    }
+  </script>
+  <title>Osho Zen Tarot</title>
+  <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="assets/favicon.ico" type="image/x-icon">
-  <link rel="shortcut icon" href="assets/favicon.ico" type="image/x-icon">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#0e0c12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
-  <div class="container">
-    <h1>Osho Zen Tarot</h1>
-    <div class="button-container">
-      <select id="cardSelect">
-        <option value="">Browse Cards</option>
-      </select>
-      <button id="drawButton" data-goatcounter-click="Draw Button">Draw</button>
-      <button id="headsOrTailsButton" data-goatcounter-click="Heads or Tails Button">Heads or Tails</button>
-    </div>
-    <div id="headsOrTailsContainer">
-      <button id="goBackButton">Go back</button>
-    </div>
-    <div id="cardContainer">
-      <img id="cardImage" src="" alt="Tarot Card">
-      <h2>Card Text</h2>
-      <div id="cardText"></div>
-      <h2>Card Commentary</h2>
-      <div id="cardCommentary"></div>
-      <div id="drawnCardsContainer">
-        <h2>Previously Drawn Cards</h2>
-        <ul id="drawnCardsList"></ul>
+  <header class="topbar">
+    <a class="brand" href="#">Osho Zen Tarot</a>
+    <nav>
+      <a class="ghost nav-link" id="journalLink" href="#journal" hidden>Journal</a>
+      <button class="ghost" id="browseButton" data-goatcounter-click="Browse Cards">Browse cards</button>
+      <button class="ghost" id="coinButton" data-goatcounter-click="Heads or Tails Button">Heads or tails</button>
+      <button class="ghost" id="soundButton" aria-pressed="false" title="Sound effects">Sound off</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="pickerView">
+      <section class="daily" id="daily">
+        <button class="daily-card" id="dailyCard" aria-label="Open the card of the day"><img id="dailyImage" alt=""></button>
+        <div class="daily-text">
+          <p class="eyebrow" id="dailyDate"></p>
+          <h2 id="dailyName"></h2>
+          <p class="suit" id="dailyRank"></p>
+          <p class="daily-excerpt" id="dailyExcerpt"></p>
+          <button class="ghost" id="dailyMore">Read the card</button>
+        </div>
+      </section>
+
+      <h1>Choose a spread</h1>
+      <p class="lede">Pick a layout, hold your question in mind, and draw from the deck.</p>
+      <div class="spread-grid" id="spreadGrid"></div>
+    </section>
+
+    <section id="readingView" hidden>
+      <div class="reading-head">
+        <a class="back" href="#">&larr; All spreads</a>
+        <h1 id="spreadName"></h1>
+        <details class="about">
+          <summary>About this spread</summary>
+          <p id="spreadIntro"></p>
+        </details>
+      </div>
+
+      <div class="reading">
+        <div class="table">
+          <div class="board" id="board"></div>
+          <p class="status" id="status" aria-live="polite"></p>
+          <div class="deck-controls" id="deckControls">
+            <button class="ghost" id="shuffleButton">Shuffle</button>
+            <button class="ghost" id="cutButton">Cut the deck</button>
+          </div>
+          <div class="fan" id="fan" aria-label="The deck, face down"></div>
+        </div>
+
+        <aside class="panel">
+          <label class="field" id="variantField" hidden>
+            <span>Variation</span>
+            <select id="variantSelect"></select>
+          </label>
+          <label class="field">
+            <span>Your question</span>
+            <textarea id="question" rows="3" placeholder="What would you like to look at?"></textarea>
+          </label>
+          <div class="actions">
+            <button class="primary" id="copyButton" disabled data-goatcounter-click="Copy reading">Copy reading</button>
+            <div class="actions-row">
+              <button class="ghost" id="undoButton" disabled>Undo last card</button>
+              <button class="ghost" id="resetButton">New reading</button>
+            </div>
+            <button class="ghost" id="linkButton" disabled>Copy link to this reading</button>
+            <p class="saved-note" id="savedNote" hidden></p>
+          </div>
+          <ol class="positions" id="positions"></ol>
+        </aside>
+      </div>
+
+      <section class="interpretation" id="interpretation" hidden>
+        <h2>Interpretation</h2>
+        <p class="eyebrow" id="interpretationMeta"></p>
+        <div id="interpretationText"></div>
+      </section>
+    </section>
+
+    <section id="journalView" hidden>
+      <h1>Journal</h1>
+      <p class="lede" id="journalSummary"></p>
+      <div class="patterns" id="patterns"></div>
+      <h2 class="journal-heading">Readings</h2>
+      <ol class="journal-list" id="journalList"></ol>
+    </section>
+  </main>
+
+  <dialog id="cardDialog" class="card-dialog">
+    <button class="close" aria-label="Close">&times;</button>
+    <div class="card-detail">
+      <img id="detailImage" alt="">
+      <div class="card-detail-text">
+        <p class="eyebrow" id="detailPosition"></p>
+        <h2 id="detailName"></h2>
+        <p class="suit" id="detailSuit"></p>
+        <div id="detailText"></div>
+        <h3>Commentary</h3>
+        <div id="detailCommentary"></div>
       </div>
     </div>
-    <div class="container">
-      <div class="card-spreads-header">
-        <h5>Card Spreads</h5>
-        <span class="arrow">&#9660;</span>
-      </div>
-      <div class="card-spreads-content">
-        <select id="layoutDropdown">
-          <option value="">Browse Layouts</option>
-        </select>
-        <button class="small-button" id="randomButton">Random</button>
-        <p></p>
-        <p></p>
-        <div id="layoutContainer"></div>
+  </dialog>
+
+  <dialog id="browseDialog" class="browse-dialog">
+    <button class="close" aria-label="Close">&times;</button>
+    <h2>The deck</h2>
+    <div id="browseGrid"></div>
+  </dialog>
+
+  <dialog id="coinDialog" class="coin-dialog">
+    <button class="close" aria-label="Close">&times;</button>
+    <svg width="0" height="0" aria-hidden="true">
+      <defs>
+        <radialGradient id="coinGold" cx="35%" cy="30%" r="75%">
+          <stop offset="0" stop-color="#fbe8ad"/>
+          <stop offset="0.45" stop-color="#dbb465"/>
+          <stop offset="0.8" stop-color="#a87e34"/>
+          <stop offset="1" stop-color="#7a5a22"/>
+        </radialGradient>
+        <mask id="moonMask">
+          <circle cx="50" cy="50" r="23" fill="#fff"/>
+          <circle cx="60" cy="43" r="20" fill="#000"/>
+        </mask>
+      </defs>
+    </svg>
+    <div class="coin-stage" id="coinStage">
+      <div class="coin" id="coin" data-side="heads">
+        <div class="coin-face heads"><svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle cx="50" cy="50" r="48" fill="url(#coinGold)" stroke="#6e5020" stroke-width="1.5"/>
+          <circle cx="50" cy="50" r="41" fill="none" stroke="#7a5a22" stroke-width="1.6" stroke-dasharray="0.1 3.2" stroke-linecap="round"/>
+          <circle cx="50" cy="50" r="37" fill="none" stroke="#8c6a2c" stroke-width="0.6"/>
+          <g stroke="#7a5a22" stroke-width="2.2" stroke-linecap="round">
+            <line x1="50" y1="18" x2="50" y2="26"/><line x1="50" y1="74" x2="50" y2="82"/>
+            <line x1="18" y1="50" x2="26" y2="50"/><line x1="74" y1="50" x2="82" y2="50"/>
+            <line x1="27.4" y1="27.4" x2="33" y2="33"/><line x1="67" y1="67" x2="72.6" y2="72.6"/>
+            <line x1="27.4" y1="72.6" x2="33" y2="67"/><line x1="67" y1="33" x2="72.6" y2="27.4"/>
+          </g>
+          <circle cx="50" cy="50" r="14" fill="#8c6a2c"/>
+          <circle cx="46" cy="46" r="5" fill="#c9a45c" opacity="0.5"/>
+        </svg></div>
+        <div class="coin-face tails"><svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle cx="50" cy="50" r="48" fill="url(#coinGold)" stroke="#6e5020" stroke-width="1.5"/>
+          <circle cx="50" cy="50" r="41" fill="none" stroke="#7a5a22" stroke-width="1.6" stroke-dasharray="0.1 3.2" stroke-linecap="round"/>
+          <circle cx="50" cy="50" r="37" fill="none" stroke="#8c6a2c" stroke-width="0.6"/>
+          <circle cx="50" cy="50" r="23" fill="#8c6a2c" mask="url(#moonMask)"/>
+          <g fill="#7a5a22">
+            <circle cx="66" cy="36" r="1.8"/><circle cx="71" cy="52" r="1.3"/><circle cx="60" cy="62" r="1.1"/>
+          </g>
+        </svg></div>
       </div>
     </div>
-  </div>
-  <footer>
-    
-  </footer>
+    <p id="coinResult"></p>
+    <button class="primary" id="flipAgain">Flip again</button>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+
   <script src="js/cardData.js"></script>
+  <script src="js/spreads.js"></script>
   <script src="script.js"></script>
-  <script src="layoutData.js"></script>
-  <script src="layoutScript.js"></script>
-  <script data-goatcounter="https://osho-zen-tarot.goatcounter.com/count"
-  async src="//gc.zgo.at/count.js"></script>
+  <script data-goatcounter="https://osho-zen-tarot.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </body>
 </html>
-

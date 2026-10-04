@@ -1,2 +1,5 @@
 YEDEK1/
 .DS_Store
+server/.venv/
+server/journal.db
+__pycache__/
