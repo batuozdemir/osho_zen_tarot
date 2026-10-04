@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS readings (
     cards           TEXT NOT NULL,            -- card numbers in position order, "12,45,3"
     interpretation  TEXT,
     interpreted_at  TEXT,
-    summary         TEXT NOT NULL DEFAULT ''  -- the whole reading as plain text, card texts included
+    summary         TEXT NOT NULL DEFAULT '',  -- the whole reading as plain text, card texts included
+    deleted_at      TEXT                       -- set by DELETE; the row stays so it can be restored
 )
 """
 
@@ -42,9 +43,15 @@ def db() -> sqlite3.Connection:
 
 with db() as conn:
     conn.execute(SCHEMA)
-    # Databases created before `summary` existed get the column added in place.
-    if "summary" not in {r["name"] for r in conn.execute("PRAGMA table_info(readings)")}:
+    # Databases created before a column existed get it added in place.
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(readings)")}
+    if "summary" not in columns:
         conn.execute("ALTER TABLE readings ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
+    if "deleted_at" not in columns:
+        conn.execute("ALTER TABLE readings ADD COLUMN deleted_at TEXT")
+    # A deleted reading can be restored for 30 days, then it is gone.
+    # Timestamps are ISO 8601 in UTC, so the cutoff is written the same way to compare as text.
+    conn.execute("DELETE FROM readings WHERE deleted_at < strftime('%Y-%m-%dT%H:%M:%S', 'now', '-30 days')")
 
 
 def now() -> str:
@@ -54,11 +61,14 @@ def now() -> str:
 def row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["cards"] = [int(c) for c in d["cards"].split(",") if c]
+    d.pop("deleted_at", None)
     return d
 
 
-def get_row(conn: sqlite3.Connection, reading_id: str) -> dict:
-    row = conn.execute("SELECT * FROM readings WHERE id = ?", (reading_id,)).fetchone()
+def get_row(conn: sqlite3.Connection, reading_id: str, deleted: bool = False) -> dict:
+    row = conn.execute(
+        f"SELECT * FROM readings WHERE id = ? AND deleted_at IS {'NOT ' if deleted else ''}NULL", (reading_id,)
+    ).fetchone()
     if row is None:
         raise HTTPException(404, "no such reading")
     return row_to_dict(row)
@@ -93,7 +103,7 @@ def health() -> dict:
 def list_readings(limit: int = 500) -> list[dict]:
     with db() as conn:
         rows = conn.execute(
-            "SELECT * FROM readings ORDER BY created_at DESC LIMIT ?", (min(limit, 5000),)
+            "SELECT * FROM readings WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?", (min(limit, 5000),)
         ).fetchall()
     return [row_to_dict(r) for r in rows]
 
@@ -144,7 +154,15 @@ def set_interpretation(reading_id: str, body: Interpretation) -> dict:
 def delete_reading(reading_id: str) -> None:
     with db() as conn:
         get_row(conn, reading_id)
-        conn.execute("DELETE FROM readings WHERE id = ?", (reading_id,))
+        conn.execute("UPDATE readings SET deleted_at = ? WHERE id = ?", (now(), reading_id))
+
+
+@app.post("/api/readings/{reading_id}/restore")
+def restore_reading(reading_id: str) -> dict:
+    with db() as conn:
+        get_row(conn, reading_id, deleted=True)
+        conn.execute("UPDATE readings SET deleted_at = NULL WHERE id = ?", (reading_id,))
+        return get_row(conn, reading_id)
 
 
 # Last, so the API routes above win.

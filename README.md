@@ -63,7 +63,8 @@ tailnet ACL decides who gets in.
 | POST | `api/readings` | `{"spread", "variant", "question", "cards": [n, ...], "summary"}` | Saves a finished reading |
 | PUT | `api/readings/{id}/question` | `{"question", "summary"}` | Updates the question (and the summary that quotes it) |
 | PUT | `api/readings/{id}/interpretation` | `{"text"}` (Markdown) | Saves Claude's interpretation; the open page picks it up within seconds |
-| DELETE | `api/readings/{id}` | | Deletes a reading |
+| DELETE | `api/readings/{id}` | | Deletes a reading; it can be restored for 30 days, then it is purged |
+| POST | `api/readings/{id}/restore` | | Brings a deleted reading back (the page's Undo) |
 
 `cards` are card numbers in position order. `summary` is the whole reading as plain text:
 question, spread, a note on the deck, and every position with its card's full Osho text

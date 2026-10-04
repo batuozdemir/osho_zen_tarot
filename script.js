@@ -820,7 +820,7 @@ function renderJournalList(readings) {
         <span class="journal-question"></span>
         <span class="journal-cards"></span>
       </a>
-      <button class="journal-delete" aria-label="Delete this reading">&times;</button>`;
+      <button class="journal-delete" aria-label="Delete this reading"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
     li.querySelector('a').href = readingLink(r);
     li.querySelector('.journal-date').textContent = formatDate(r.created_at, { day: 'numeric', month: 'short', year: 'numeric' });
     li.querySelector('.journal-spread').textContent = (s ? s.name : r.spread) + (r.interpretation ? ' · interpreted' : '');
@@ -834,12 +834,25 @@ function renderJournalList(readings) {
       img.loading = 'lazy';
       cardsEl.appendChild(img);
     });
-    li.querySelector('.journal-delete').addEventListener('click', async () => {
-      if (!confirm('Delete this reading and its interpretation?')) return;
-      await api(`readings/${r.id}`, { method: 'DELETE' }).catch(() => {});
-      showJournal();
-    });
+    li.querySelector('.journal-delete').addEventListener('click', () => deleteFromJournal(r.id));
     list.appendChild(li);
+  });
+}
+
+// Deletes at once; the toast offers an undo, which the server can honour for 30 days.
+async function deleteFromJournal(id) {
+  try {
+    await api(`readings/${id}`, { method: 'DELETE' });
+  } catch {
+    return toast('Could not delete the reading.');
+  }
+  showJournal();
+  toast('Reading deleted.', {
+    label: 'Undo',
+    run: async () => {
+      await api(`readings/${id}/restore`, { method: 'POST' }).catch(() => {});
+      showJournal();
+    },
   });
 }
 
@@ -969,12 +982,20 @@ function readingText() {
   return lines.join('\n');
 }
 
-function toast(message) {
+// A short message; with `action`, a button too, and it stays up longer.
+function toast(message, action) {
   const t = $('toast');
-  t.textContent = message;
+  const button = $('toastAction');
+  $('toastText').textContent = message;
+  button.hidden = !action;
+  button.onclick = null;
+  if (action) {
+    button.textContent = action.label;
+    button.onclick = () => { t.classList.remove('show'); action.run(); };
+  }
   t.classList.add('show');
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.remove('show'), 2600);
+  toast.timer = setTimeout(() => t.classList.remove('show'), action ? 7000 : 2600);
 }
 
 // ---------- dialogs ----------

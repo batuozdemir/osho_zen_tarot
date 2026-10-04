@@ -148,10 +148,15 @@ main {
 .reading-head h1 { margin: 2px 0 4px; }
 
 .back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--muted);
   text-decoration: none;
   font-size: 16px;
 }
+
+.back .icon { width: 16px; height: 16px; }
 
 .back:hover { color: var(--gold); }
 
@@ -332,6 +337,8 @@ select:focus, textarea:focus { border-color: var(--gold); outline: none; }
   display: grid;
   place-items: center;
   font-size: 13px;
+  line-height: 1;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .positions li.filled .pos-num, .positions li.next .pos-num { border-color: var(--gold); color: var(--gold); }
@@ -367,11 +374,14 @@ dialog::backdrop { background: rgba(5, 4, 8, 0.75); backdrop-filter: blur(3px); 
   border-radius: 50%;
   border: 0;
   background: rgba(0, 0, 0, 0.4);
-  font-size: 24px;
-  line-height: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
 }
 
 .close:hover { color: var(--gold); }
+.close .icon { width: 20px; height: 20px; }
+.icon { display: block; flex: none; }
 
 .card-detail {
   display: grid;
@@ -466,7 +476,18 @@ dialog::backdrop { background: rgba(5, 4, 8, 0.75); backdrop-filter: blur(3px); 
   z-index: 60;
 }
 
-.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+
+.toast { display: flex; align-items: center; gap: 14px; white-space: nowrap; }
+.toast-action {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--gold);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 
 
 .sound-button { display: inline-flex; align-items: center; gap: 6px; }
@@ -605,14 +626,18 @@ dialog::backdrop { background: rgba(5, 4, 8, 0.75); backdrop-filter: blur(3px); 
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   border: 1px solid transparent;
   background: none;
   color: var(--muted);
-  font-size: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
 }
+
+.journal-delete .icon { width: 16px; height: 16px; }
 
 .journal-delete:hover { border-color: var(--line); color: var(--text); }
 
