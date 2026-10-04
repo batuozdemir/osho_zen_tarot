@@ -18,6 +18,8 @@ let ownReading = false;  // saved in this sitting, so undo may still change it
 let pollTimer = null;
 let saving = false;
 let saveFailed = false;
+let pendingSave = null;  // the save in flight, so undo can cancel exactly that one
+let verified = true;     // false while a journal reading opened from a link awaits the server's copy
 
 // Bumped whenever the reading on screen is replaced or changed. Anything asynchronous (a
 // card in flight, a save, a poll, a debounced question update) captures it first and
@@ -25,14 +27,25 @@ let saveFailed = false;
 let gen = 0;
 const isCurrent = g => g === gen;
 
-function beginTransition() {
-  // A question edit still waiting for its debounce belongs to the reading being left;
-  // send it now, while that reading is still the one on screen.
+// A question edit still waiting for its debounce belongs to the reading on screen; send
+// it now, before anything about that reading changes. If the reading's first save is
+// still in flight, hand the latest question to that save instead.
+function flushQuestion() {
   if (questionTimer) {
     clearTimeout(questionTimer);
     questionTimer = null;
-    if (readingId && spread) sendQuestion();
+    if (readingId && spread && verified) sendQuestion();
   }
+  if (pendingSave && !pendingSave.cancelled && spread && isDone()) {
+    try {
+      pendingSave.final = { question: $('question').value.trim(), summary: readingText() };
+    } catch {}
+  }
+}
+
+function beginTransition() {
+  flushQuestion();
+  hideToastAction();
   gen++;
   flying = false;
   saving = false;
@@ -351,10 +364,13 @@ function openSharedReading(params) {
   readingId = params.get('id');
   interpretation = null;
   ownReading = false;
+  verified = !readingId;
+  $('question').readOnly = !verified;
   renderBoard();
   renderFan();
   update();
   if (readingId && server.on) loadReading(readingId);
+  else if (readingId) { readingId = null; verified = true; $('question').readOnly = false; update(); }
 }
 
 function showHome() {
@@ -372,6 +388,8 @@ function newReading() {
   readingId = null;
   interpretation = null;
   ownReading = false;
+  verified = true;
+  $('question').readOnly = false;
   history.replaceState(null, '', `#${spread.id}`);
   renderBoard();
   renderFan();
@@ -675,6 +693,8 @@ function place(cardEl) {
 function undo() {
   if (flying || placed.length === 0 || interpretation || (readingId && !ownReading)) return;
   if (readingId) discardSaved();
+  if (pendingSave) pendingSave.cancelled = true;
+  pendingSave = null;
   gen++;
   saving = false;
   saveFailed = false;
@@ -689,6 +709,11 @@ function undo() {
 }
 
 function changeVariant() {
+  if (flying) {
+    $('variantSelect').value = variantIndex;  // a card is in the air; finish placing it first
+    return;
+  }
+  flushQuestion();
   const before = positions().length;
   variantIndex = Number($('variantSelect').value);
   if (positions().length !== before || readingId || saving) {
@@ -747,9 +772,11 @@ async function detectServer() {
 }
 
 async function saveReading() {
-  if (!server.on || readingId || saving || !isDone()) return;
+  if (!server.on || !spread || readingId || saving || !isDone()) return;
   const g = gen;
   const question = $('question').value.trim();
+  const job = { cancelled: false, final: null };
+  pendingSave = job;
   saving = true;
   saveFailed = false;
   update();
@@ -760,16 +787,31 @@ async function saveReading() {
       body: JSON.stringify({ spread: spread.id, variant: variantIndex, question, cards: placed, summary: readingText() }),
     });
   } catch {
+    if (pendingSave === job) pendingSave = null;
     if (!isCurrent(g)) return;
     saving = false;
     saveFailed = true;
     update();
-    toast('Could not save to the journal.', { label: 'Retry', run: saveReading });
+    toast('Could not save to the journal.', { label: 'Retry', run: () => { if (isCurrent(g)) saveReading(); } });
     return;
   }
-  // The reading changed while this was saving (undo, new reading, navigation): the row
-  // describes a reading that no longer exists, so remove it again.
-  if (!isCurrent(g)) return api(`readings/${r.id}`, { method: 'DELETE' }).catch(() => {});
+  if (pendingSave === job) pendingSave = null;
+  // Undone while saving: the row describes a reading that no longer exists. Try twice,
+  // since a lost delete would leave a stray entry in the journal.
+  if (job.cancelled) {
+    const del = () => api(`readings/${r.id}`, { method: 'DELETE' });
+    return del().catch(() => setTimeout(() => del().catch(() => {}), 3000));
+  }
+  // Left for another view while saving: the reading stays in the journal, with the
+  // question as it was when it was left.
+  if (!isCurrent(g)) {
+    const update = job.final && job.final.question !== question
+      ? api(`readings/${r.id}/question`, { method: 'PUT', body: JSON.stringify(job.final) }).catch(() => {})
+      : Promise.resolve();
+    // If the journal is what was opened meanwhile, it loaded before this entry existed.
+    update.then(() => { if (location.hash === '#journal') showJournal(true); });
+    return;
+  }
   saving = false;
   readingId = r.id;
   ownReading = true;
@@ -788,7 +830,7 @@ function discardSaved() {
 let questionTimer = null;
 function onQuestionInput() {
   if (isDone()) history.replaceState(null, '', `#${shareHash()}`);
-  if (!readingId) return;  // a save in progress picks the new question up when it lands
+  if (!readingId || !verified) return;  // a save in progress picks the new question up when it lands
   clearTimeout(questionTimer);
   const g = gen, id = readingId;
   questionTimer = setTimeout(() => {
@@ -797,14 +839,21 @@ function onQuestionInput() {
   }, 700);
 }
 
+// Question writes go out one at a time, so a slow earlier one can never land after a
+// later one and overwrite it.
+let questionChain = Promise.resolve();
 function sendQuestion() {
+  if (!readingId || !verified) return;
   let body;
   try {
     body = JSON.stringify({ question: $('question').value.trim(), summary: readingText() });
   } catch {
     return;  // only reachable if the reading is incomplete; nothing sensible to send
   }
-  api(`readings/${readingId}/question`, { method: 'PUT', body }).catch(() => {});
+  const id = readingId;
+  questionChain = questionChain
+    .then(() => api(`readings/${id}/question`, { method: 'PUT', body }))
+    .catch(() => toast('Could not save the question to the journal.'));
 }
 
 async function loadReading(id) {
@@ -815,10 +864,14 @@ async function loadReading(id) {
   } catch {
     if (!isCurrent(g) || readingId !== id) return;
     readingId = null;
+    verified = true;
+    $('question').readOnly = false;
     update();
     return;
   }
   if (!isCurrent(g) || readingId !== id) return;
+  verified = true;
+  $('question').readOnly = false;
   // A link whose cards were edited by hand must not pass for the saved reading.
   if (r.spread !== spread.id || r.variant !== variantIndex || r.cards.join('-') !== placed.join('-')) {
     const link = readingLink(r);
@@ -836,13 +889,15 @@ async function loadReading(id) {
 function startPolling() {
   stopPolling();
   const g = gen, id = readingId;
+  let inFlight = false;
   pollTimer = setInterval(async () => {
     if (!isCurrent(g) || readingId !== id) return stopPolling();
-    if (document.visibilityState !== 'visible') return;
+    if (document.visibilityState !== 'visible' || inFlight) return;
+    inFlight = true;
     let r;
-    try { r = await api(`readings/${id}`); } catch { return; }
+    try { r = await api(`readings/${id}/interpretation`); } catch { return; } finally { inFlight = false; }
     if (!isCurrent(g) || readingId !== id || !r.interpretation) return;
-    if (interpretation && interpretation.at === r.interpreted_at) return;
+    if (interpretation && interpretation.at === r.interpreted_at && interpretation.text === r.interpretation) return;
     const first = !interpretation;
     interpretation = { text: r.interpretation, at: r.interpreted_at };
     update();
@@ -881,7 +936,7 @@ async function showJournal(refresh = false) {
   $('journalSummary').textContent = 'Loading…';
   let readings;
   try {
-    readings = await api('readings?limit=5000');
+    readings = await api('readings');
   } catch {
     if (isCurrent(g)) $('journalSummary').textContent = 'The journal could not be loaded.';
     return;
@@ -1072,6 +1127,13 @@ function readingText() {
     'answer. Reply in the language of the question.',
   );
   return lines.join('\n');
+}
+
+function hideToastAction() {
+  if ($('toastAction').hidden) return;
+  $('toastAction').hidden = true;
+  $('toastAction').onclick = null;
+  $('toast').classList.remove('show');
 }
 
 // A short message; with `action`, a button too, and it stays up longer.

@@ -58,10 +58,11 @@ tailnet ACL decides who gets in.
 | Method | Path | Body | What |
 |---|---|---|---|
 | GET | `api/health` | | `{"ok": true}` |
-| GET | `api/readings` | | All readings, newest first |
+| GET | `api/readings` | | All readings, newest first (`?limit=n` for only the latest) |
 | GET | `api/readings/{id}` | | One reading |
 | POST | `api/readings` | `{"spread", "variant", "question", "cards": [n, ...], "summary"}` | Saves a finished reading |
 | PUT | `api/readings/{id}/question` | `{"question", "summary"}` | Updates the question (and the summary that quotes it) |
+| GET | `api/readings/{id}/interpretation` | | Just the interpretation and its time; what an open page polls |
 | PUT | `api/readings/{id}/interpretation` | `{"text"}` (Markdown) | Saves Claude's interpretation; an open page picks it up, or a revision of it, within seconds |
 | DELETE | `api/readings/{id}` | | Deletes a reading; it can be restored for 30 days, then it is purged (checked on every list, delete and restore) |
 | POST | `api/readings/{id}/restore` | | Brings a deleted reading back (the page's Undo) |

@@ -113,11 +113,13 @@ def health() -> dict:
 
 
 @app.get("/api/readings")
-def list_readings(limit: int = 500) -> list[dict]:
+def list_readings(limit: int | None = None) -> list[dict]:
+    """All readings, newest first; `limit` caps the count when only the latest are needed."""
     with db() as conn:
         purge(conn)
         rows = conn.execute(
-            "SELECT * FROM readings WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?", (min(limit, 5000),)
+            "SELECT * FROM readings WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?",
+            (limit if limit and limit > 0 else -1,),
         ).fetchall()
     return [row_to_dict(r) for r in rows]
 
@@ -151,6 +153,14 @@ def set_question(reading_id: str, body: Question) -> dict:
         if body.summary is not None:
             conn.execute("UPDATE readings SET summary = ? WHERE id = ?", (body.summary, reading_id))
         return get_row(conn, reading_id)
+
+
+@app.get("/api/readings/{reading_id}/interpretation")
+def get_interpretation(reading_id: str) -> dict:
+    """Just the interpretation, for the page to poll without fetching the card texts again."""
+    with db() as conn:
+        r = get_row(conn, reading_id)
+    return {"interpretation": r["interpretation"], "interpreted_at": r["interpreted_at"]}
 
 
 @app.put("/api/readings/{reading_id}/interpretation")
