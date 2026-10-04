@@ -33,25 +33,44 @@ CREATE TABLE IF NOT EXISTS readings (
     interpretation  TEXT,
     interpreted_at  TEXT,
     summary         TEXT NOT NULL DEFAULT '',  -- the whole reading as plain text, card texts included
-    deleted_at      TEXT                       -- set by DELETE; the row stays so it can be restored
-)
+    deleted_at      TEXT,                      -- set by DELETE; the row stays so it can be restored
+    impression      TEXT NOT NULL DEFAULT ''   -- Batu's first impression, written before the card texts
+);
+-- Dated notes written when coming back to a reading later.
+CREATE TABLE IF NOT EXISTS notes (
+    id          INTEGER PRIMARY KEY,
+    reading_id  TEXT NOT NULL REFERENCES readings(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL,
+    prompt      TEXT NOT NULL DEFAULT '',
+    text        TEXT NOT NULL
+);
+-- An interpretation that a newer one replaced, kept behind the page's "Earlier version".
+CREATE TABLE IF NOT EXISTS earlier_interpretations (
+    id              INTEGER PRIMARY KEY,
+    reading_id      TEXT NOT NULL REFERENCES readings(id) ON DELETE CASCADE,
+    text            TEXT NOT NULL,
+    interpreted_at  TEXT NOT NULL
+);
 """
 
 
 def db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")  # so purging a reading takes its notes with it
     return conn
 
 
 with db() as conn:
-    conn.execute(SCHEMA)
+    conn.executescript(SCHEMA)
     # Databases created before a column existed get it added in place.
     columns = {r["name"] for r in conn.execute("PRAGMA table_info(readings)")}
     if "summary" not in columns:
         conn.execute("ALTER TABLE readings ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
     if "deleted_at" not in columns:
         conn.execute("ALTER TABLE readings ADD COLUMN deleted_at TEXT")
+    if "impression" not in columns:
+        conn.execute("ALTER TABLE readings ADD COLUMN impression TEXT NOT NULL DEFAULT ''")
 
 
 def purge(conn: sqlite3.Connection) -> None:
@@ -71,11 +90,41 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def row_to_dict(row: sqlite3.Row) -> dict:
+def row_to_dict(row: sqlite3.Row, notes: list[dict], earlier: list[dict]) -> dict:
     d = dict(row)
     d["cards"] = [int(c) for c in d["cards"].split(",") if c]
     d.pop("deleted_at", None)
+    d["notes"] = notes
+    d["earlier"] = earlier
     return d
+
+
+def notes_by_reading(conn: sqlite3.Connection, ids: list[str]) -> dict[str, list[dict]]:
+    """Notes oldest first, so they read as a timeline."""
+    out: dict[str, list[dict]] = {i: [] for i in ids}
+    marks = ",".join("?" * len(ids))
+    for r in conn.execute(f"SELECT * FROM notes WHERE reading_id IN ({marks}) ORDER BY created_at, id", ids):
+        out[r["reading_id"]].append({"id": r["id"], "created_at": r["created_at"], "prompt": r["prompt"], "text": r["text"]})
+    return out
+
+
+def earlier_by_reading(conn: sqlite3.Connection, ids: list[str]) -> dict[str, list[dict]]:
+    """Replaced interpretations, newest first."""
+    out: dict[str, list[dict]] = {i: [] for i in ids}
+    marks = ",".join("?" * len(ids))
+    for r in conn.execute(
+        f"SELECT * FROM earlier_interpretations WHERE reading_id IN ({marks}) ORDER BY interpreted_at DESC, id DESC", ids
+    ):
+        out[r["reading_id"]].append({"text": r["text"], "interpreted_at": r["interpreted_at"]})
+    return out
+
+
+def with_children(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict]:
+    ids = [r["id"] for r in rows]
+    if not ids:
+        return []
+    notes, earlier = notes_by_reading(conn, ids), earlier_by_reading(conn, ids)
+    return [row_to_dict(r, notes[r["id"]], earlier[r["id"]]) for r in rows]
 
 
 def get_row(conn: sqlite3.Connection, reading_id: str, deleted: bool = False) -> dict:
@@ -84,24 +133,46 @@ def get_row(conn: sqlite3.Connection, reading_id: str, deleted: bool = False) ->
     ).fetchone()
     if row is None:
         raise HTTPException(404, "no such reading")
-    return row_to_dict(row)
+    return with_children(conn, [row])[0]
 
 
 class NewReading(BaseModel):
     spread: str = Field(max_length=64)
     variant: int = Field(default=0, ge=0, le=64)
     question: str = Field(default="", max_length=4000)
+    impression: str = Field(default="", max_length=4000)
     cards: list[int] = Field(min_length=1, max_length=79)
     summary: str = Field(default="", max_length=200_000)
+    # When the spread was completed; the page sends it so that a reading kept on the device
+    # while the journal was out of reach is saved under the day it was drawn.
+    created_at: datetime | None = None
 
 
-class Question(BaseModel):
-    question: str = Field(max_length=4000)
+class Edit(BaseModel):
+    """The parts of a reading Batu writes himself; a field left out stays as it is."""
+    question: str | None = Field(default=None, max_length=4000)
+    impression: str | None = Field(default=None, max_length=4000)
     summary: str | None = Field(default=None, max_length=200_000)
+
+
+class Note(BaseModel):
+    prompt: str = Field(default="", max_length=200)
+    text: str = Field(min_length=1, max_length=20_000)
+    # Only the page's Undo sends this, to put a deleted note back where it was.
+    created_at: datetime | None = None
 
 
 class Interpretation(BaseModel):
     text: str = Field(min_length=1, max_length=100_000)
+
+
+def stamp(t: datetime | None) -> str:
+    """ISO 8601 in UTC to the second, the one form every timestamp here is stored in."""
+    if t is None:
+        return now()
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return t.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 app = FastAPI(title="tarot")
@@ -121,7 +192,7 @@ def list_readings(limit: int | None = None) -> list[dict]:
             "SELECT * FROM readings WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?",
             (limit if limit and limit > 0 else -1,),
         ).fetchall()
-    return [row_to_dict(r) for r in rows]
+        return with_children(conn, rows)
 
 
 @app.get("/api/readings/{reading_id}")
@@ -134,24 +205,27 @@ def get_reading(reading_id: str) -> dict:
 def create_reading(body: NewReading) -> dict:
     if any(not 1 <= c <= 79 for c in body.cards) or len(set(body.cards)) != len(body.cards):
         raise HTTPException(422, "cards must be distinct numbers from 1 to 79")
-    created = now()
+    created = stamp(body.created_at)
     reading_id = f"{created[:10]}-{secrets.token_hex(3)}"
     with db() as conn:
         conn.execute(
-            "INSERT INTO readings (id, created_at, spread, variant, question, cards, summary) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (reading_id, created, body.spread, body.variant, body.question,
+            "INSERT INTO readings (id, created_at, spread, variant, question, impression, cards, summary)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (reading_id, created, body.spread, body.variant, body.question, body.impression,
              ",".join(str(c) for c in body.cards), body.summary),
         )
         return get_row(conn, reading_id)
 
 
-@app.put("/api/readings/{reading_id}/question")
-def set_question(reading_id: str, body: Question) -> dict:
+@app.patch("/api/readings/{reading_id}")
+@app.put("/api/readings/{reading_id}/question")  # the earlier name, for a page still open from before
+def edit_reading(reading_id: str, body: Edit) -> dict:
     with db() as conn:
         get_row(conn, reading_id)
-        conn.execute("UPDATE readings SET question = ? WHERE id = ?", (body.question, reading_id))
-        if body.summary is not None:
-            conn.execute("UPDATE readings SET summary = ? WHERE id = ?", (body.summary, reading_id))
+        for field in ("question", "impression", "summary"):
+            value = getattr(body, field)
+            if value is not None:
+                conn.execute(f"UPDATE readings SET {field} = ? WHERE id = ?", (value, reading_id))
         return get_row(conn, reading_id)
 
 
@@ -160,13 +234,18 @@ def get_interpretation(reading_id: str) -> dict:
     """Just the interpretation, for the page to poll without fetching the card texts again."""
     with db() as conn:
         r = get_row(conn, reading_id)
-    return {"interpretation": r["interpretation"], "interpreted_at": r["interpreted_at"]}
+    return {"interpretation": r["interpretation"], "interpreted_at": r["interpreted_at"], "earlier": r["earlier"]}
 
 
 @app.put("/api/readings/{reading_id}/interpretation")
 def set_interpretation(reading_id: str, body: Interpretation) -> dict:
     with db() as conn:
-        get_row(conn, reading_id)
+        r = get_row(conn, reading_id)
+        if r["interpretation"] and r["interpretation"] != body.text:
+            conn.execute(
+                "INSERT INTO earlier_interpretations (reading_id, text, interpreted_at) VALUES (?, ?, ?)",
+                (reading_id, r["interpretation"], r["interpreted_at"] or now()),
+            )
         conn.execute(
             "UPDATE readings SET interpretation = ?, interpreted_at = ? WHERE id = ?",
             (body.text, now(), reading_id),
@@ -189,6 +268,26 @@ def restore_reading(reading_id: str) -> dict:
         get_row(conn, reading_id, deleted=True)
         conn.execute("UPDATE readings SET deleted_at = NULL WHERE id = ?", (reading_id,))
         return get_row(conn, reading_id)
+
+
+@app.post("/api/readings/{reading_id}/notes", status_code=201)
+def add_note(reading_id: str, body: Note) -> dict:
+    created = stamp(body.created_at)
+    with db() as conn:
+        get_row(conn, reading_id)
+        cur = conn.execute(
+            "INSERT INTO notes (reading_id, created_at, prompt, text) VALUES (?, ?, ?, ?)",
+            (reading_id, created, body.prompt, body.text),
+        )
+    return {"id": cur.lastrowid, "created_at": created, "prompt": body.prompt, "text": body.text}
+
+
+@app.delete("/api/readings/{reading_id}/notes/{note_id}", status_code=204)
+def delete_note(reading_id: str, note_id: int) -> None:
+    with db() as conn:
+        get_row(conn, reading_id)
+        if conn.execute("DELETE FROM notes WHERE id = ? AND reading_id = ?", (note_id, reading_id)).rowcount == 0:
+            raise HTTPException(404, "no such note")
 
 
 # Last, so the API routes above win.

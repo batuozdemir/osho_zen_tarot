@@ -46,6 +46,16 @@
         </div>
       </section>
 
+      <section class="home-block" id="localBlock" hidden>
+        <h2>On this device</h2>
+        <ul class="local-list" id="localList"></ul>
+      </section>
+
+      <section class="home-block" id="recentBlock" hidden>
+        <h2>Use again</h2>
+        <div class="recent-row" id="recentRow"></div>
+      </section>
+
       <h1>Choose a spread</h1>
       <p class="lede">Pick a layout, hold your question in mind, and draw from the deck.</p>
       <div class="spread-grid" id="spreadGrid"></div>
@@ -62,6 +72,17 @@
       </div>
 
       <div class="reading">
+        <div class="ask">
+          <label class="field" id="variantField" hidden>
+            <span>Variation</span>
+            <select id="variantSelect"></select>
+          </label>
+          <label class="field">
+            <span>Your question</span>
+            <textarea id="question" rows="3" placeholder="What would you like to look at?"></textarea>
+          </label>
+        </div>
+
         <div class="table">
           <div class="board" id="board"></div>
           <p class="status" id="status" aria-live="polite"></p>
@@ -73,13 +94,9 @@
         </div>
 
         <aside class="panel">
-          <label class="field" id="variantField" hidden>
-            <span>Variation</span>
-            <select id="variantSelect"></select>
-          </label>
-          <label class="field">
-            <span>Your question</span>
-            <textarea id="question" rows="3" placeholder="What would you like to look at?"></textarea>
+          <label class="field" id="impressionField" hidden>
+            <span>Before reading the explanation: what catches your attention?</span>
+            <textarea id="impression" rows="3" placeholder="Optional, in your own words"></textarea>
           </label>
           <div class="actions">
             <button class="primary" id="copyButton" disabled data-goatcounter-click="Copy reading">Copy reading</button>
@@ -98,22 +115,44 @@
         <h2>Interpretation</h2>
         <p class="eyebrow" id="interpretationMeta"></p>
         <div id="interpretationText"></div>
+        <div id="earlierVersions"></div>
+      </section>
+
+      <section class="notes" id="notes" hidden>
+        <h2>Coming back to this</h2>
+        <ol class="note-list" id="noteList"></ol>
+        <div class="note-prompts" id="notePrompts">
+          <button class="chip" aria-pressed="false">What stayed with me?</button>
+          <button class="chip" aria-pressed="false">What looks different now?</button>
+          <button class="chip" aria-pressed="false">What didn't fit?</button>
+        </div>
+        <textarea id="noteText" rows="3" placeholder="A note for today"></textarea>
+        <button class="ghost" id="noteSave">Add note</button>
       </section>
     </section>
 
     <section id="journalView" hidden>
       <h1>Journal</h1>
       <p class="lede" id="journalSummary"></p>
-      <div class="patterns" id="patterns"></div>
-      <h2 class="journal-heading">Readings</h2>
+      <div class="pattern-block" id="recurringBlock" hidden></div>
+      <div class="journal-head">
+        <h2 class="journal-heading">Readings</h2>
+        <input type="search" id="journalSearch" placeholder="Search questions, notes, interpretations" aria-label="Search the journal">
+      </div>
+      <p class="pattern-note" id="searchCount" hidden></p>
       <ol class="journal-list" id="journalList"></ol>
+      <div class="pattern-block suits-block" id="suitsBlock" hidden></div>
     </section>
   </main>
 
   <dialog id="cardDialog" class="card-dialog">
     <button class="close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
     <div class="card-detail">
-      <img id="detailImage" alt="">
+      <div class="card-detail-figure">
+        <img id="detailImage" alt="">
+        <button class="card-nav prev" id="detailPrev" aria-label="Previous position"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="card-nav next" id="detailNext" aria-label="Next position"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
       <div class="card-detail-text">
         <p class="eyebrow" id="detailPosition"></p>
         <h2 id="detailName"></h2>

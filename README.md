@@ -1,10 +1,19 @@
 # Osho Zen Tarot
 
 A small site for drawing Osho Zen Tarot spreads. Pick one of 13 spreads, shuffle and cut
-the deck, pick cards from a face-down fan, and each card flies into its position. A
-finished reading is saved to the journal (tailnet copy), where Claude can pick it up and
-interpret it without any copying; on the public copy it can be copied as plain text for
-any assistant.
+the deck, pick cards from a face-down fan, and each card flies into its position. Once
+the spread is complete, an optional field asks for a first impression before the card
+texts are read. A finished reading is saved to the journal (tailnet copy), where Claude
+can pick it up and interpret it without any copying; on the public copy it can be copied
+as plain text for any assistant. Under the interpretation, dated "coming back to this"
+notes can be added later.
+
+A reading in progress is kept in the browser's local storage, so a closed tab or a
+reload resumes it (the home page lists it under "On this device"). On the tailnet copy a
+finished reading that could not be saved (offline, server down) stays there too, marked
+"Not yet saved to journal", and is saved with its original date the next time the page
+loads with the journal reachable. The home page also has a "Use again" row of the last
+few spreads finished on that device.
 
 It runs in two places from the same code:
 
@@ -60,17 +69,22 @@ tailnet ACL decides who gets in.
 | GET | `api/health` | | `{"ok": true}` |
 | GET | `api/readings` | | All readings, newest first (`?limit=n` for only the latest) |
 | GET | `api/readings/{id}` | | One reading |
-| POST | `api/readings` | `{"spread", "variant", "question", "cards": [n, ...], "summary"}` | Saves a finished reading |
-| PUT | `api/readings/{id}/question` | `{"question", "summary"}` | Updates the question (and the summary that quotes it) |
-| GET | `api/readings/{id}/interpretation` | | Just the interpretation and its time; what an open page polls |
-| PUT | `api/readings/{id}/interpretation` | `{"text"}` (Markdown) | Saves Claude's interpretation; an open page picks it up, or a revision of it, within seconds |
+| POST | `api/readings` | `{"spread", "variant", "question", "impression", "cards": [n, ...], "summary", "created_at"?}` | Saves a finished reading; `created_at` is when it was drawn, for one saved late |
+| PATCH | `api/readings/{id}` | `{"question"?, "impression"?, "summary"?}` | Updates what Batu wrote (and the summary that quotes it); `PUT api/readings/{id}/question` is the old name |
+| GET | `api/readings/{id}/interpretation` | | The interpretation, its time and the earlier versions; what an open page polls |
+| PUT | `api/readings/{id}/interpretation` | `{"text"}` (Markdown) | Saves Claude's interpretation; a different text moves the previous one to `earlier`. An open page picks it up within seconds |
+| POST | `api/readings/{id}/notes` | `{"prompt", "text"}` | Adds a dated "coming back to this" note |
+| DELETE | `api/readings/{id}/notes/{note_id}` | | Deletes a note (the page's Undo posts it again with its `created_at`) |
 | DELETE | `api/readings/{id}` | | Deletes a reading; it can be restored for 30 days, then it is purged (checked on every list, delete and restore) |
 | POST | `api/readings/{id}/restore` | | Brings a deleted reading back (the page's Undo) |
 
 `cards` are card numbers in position order. `summary` is the whole reading as plain text:
-question, spread, a note on the deck, and every position with its card's full Osho text
-and commentary. It is the same text the "Copy reading" button gives, written so that a
-chat assistant with no other context can interpret it.
+question, first impression, spread, a note on the deck, and every position with its
+card's full Osho text and commentary. It is the same text the "Copy reading" button
+gives, written so that a chat assistant with no other context can interpret it. A
+reading also carries `impression` (Batu's own words, written before the card texts),
+`notes` (oldest first: `created_at`, `prompt`, `text`) and `earlier` (replaced
+interpretations, newest first).
 
 ## Interpreting a reading (for Claude)
 
@@ -81,18 +95,25 @@ or asks Claude to do a reading:
 2. Its `summary` holds everything: the question, the spread, and every position with its
    card's full text and commentary. The guidebook (`assets/UserGuide/guide.md`) adds
    the symbols, and earlier readings in the journal can be drawn on when a card or theme
-   recurs.
+   recurs. If there is an `impression`, start from it: it is what Batu saw in the cards
+   before any explanation. His `notes` say what stayed, what changed and what did not
+   fit when he came back to a reading; read them before a follow-up.
 3. **Make it a conversation, not a verdict.** If the question is unclear, or the cards
    need more context about his situation to be read well, ask first: a few short
    questions at a time, then wait for the answers before interpreting.
 4. Read each card in its position, then bring them together into one answer to the
-   question, in the language of the question. Treat the cards and Osho's words as a
-   mirror for reflection, not as facts, predictions or medical and psychological
-   diagnoses; positions about the future or past lives are read the same way. Afterwards,
-   offer to go deeper into any card or part of the answer.
+   question, in the language of the question. For big spreads (six cards or more) give
+   a short synthesis, one or two tensions between the cards and a question back, instead
+   of an essay on every card. Treat the cards and Osho's words as a mirror for
+   reflection, not as facts, predictions or medical and psychological diagnoses;
+   positions about the future or past lives are read the same way. Other-person
+   positions are lenses, not mind-reading. A mismatch is information, not resistance:
+   when a card does not fit, ask what the gap shows. Afterwards, offer to go deeper into
+   any card or part of the answer.
 5. `PUT api/readings/{id}/interpretation` with `{"text": "<Markdown>"}` once the
-   interpretation is settled (again if a follow-up changes it). The open page shows it
-   within seconds. Give the interpretation in the chat too.
+   interpretation is settled (again if a follow-up changes it; the page keeps the
+   previous one behind "Earlier version"). The open page shows it within seconds. Give
+   the interpretation in the chat too.
 
 The "Copy reading" text asks an outside assistant to work the same way.
 

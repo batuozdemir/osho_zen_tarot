@@ -20,6 +20,10 @@ let saving = false;
 let saveFailed = false;
 let pendingSave = null;  // the save in flight, so undo can cancel exactly that one
 let verified = true;     // false while a journal reading opened from a link awaits the server's copy
+let notes = [];          // "coming back to this" notes of the saved reading on screen
+let earlier = [];        // interpretations a newer one replaced, newest first
+let localKey = null;     // this reading's entry among the readings kept on this device
+let drawnAt = null;      // when the spread was completed, ISO time
 
 // Bumped whenever the reading on screen is replaced or changed. Anything asynchronous (a
 // card in flight, a save, a poll, a debounced question update) captures it first and
@@ -34,13 +38,18 @@ function flushQuestion() {
   if (questionTimer) {
     clearTimeout(questionTimer);
     questionTimer = null;
-    if (readingId && spread && verified) sendQuestion();
+    if (readingId && spread && verified) sendEdits();
   }
   if (pendingSave && !pendingSave.cancelled && spread && isDone()) {
     try {
-      pendingSave.final = { question: $('question').value.trim(), summary: readingText() };
+      pendingSave.final = { ...ownWords(), summary: readingText() };
     } catch {}
   }
+}
+
+// What Batu writes himself on a reading.
+function ownWords() {
+  return { question: $('question').value.trim(), impression: $('impression').value.trim() };
 }
 
 function beginTransition() {
@@ -52,6 +61,8 @@ function beginTransition() {
   saveFailed = false;
   document.querySelectorAll('.flyer').forEach(f => f.remove());
   stopPolling();
+  $('noteText').value = '';
+  setNotePrompt('');
 }
 
 // The journal exists only where the server answers (the tailnet copy, not GitHub Pages).
@@ -302,6 +313,176 @@ function renderPicker() {
   });
 }
 
+// ---------- kept on this device ----------
+
+// A reading in progress, or a finished one the journal has not received yet, is kept in
+// localStorage until it is saved, so a closed tab or a dropped connection loses nothing.
+// At most one unfinished reading is kept (the latest); finished ones wait until they save.
+const LOCAL_STORE = 'tarot-local';
+
+function localReadings() {
+  try { return JSON.parse(localStorage.getItem(LOCAL_STORE)) || []; } catch { return []; }
+}
+
+function storeLocal(list) {
+  try { localStorage.setItem(LOCAL_STORE, JSON.stringify(list.slice(0, 12))); } catch {}
+}
+
+function dropLocal(key) {
+  storeLocal(localReadings().filter(e => e.key !== key));
+}
+
+function entryDone(e) {
+  const s = spreads.find(sp => sp.id === e.spread);
+  return !!s && e.placed.length >= s.variants[e.variant].positions.length;
+}
+
+// Entries are read back from storage, so they are checked like a link would be.
+function validEntry(e) {
+  const s = e && spreads.find(sp => sp.id === e.spread);
+  const ok = n => Number.isInteger(n) && n >= 1 && n <= TOTAL_CARDS;
+  return !!s && Number.isInteger(e.variant) && e.variant >= 0 && e.variant < s.variants.length &&
+    Array.isArray(e.placed) && e.placed.every(ok) && e.placed.length <= s.variants[e.variant].positions.length &&
+    Array.isArray(e.deck) && e.deck.every(ok) && new Set([...e.placed, ...e.deck]).size === e.placed.length + e.deck.length;
+}
+
+// Where the journal exists: the server has answered on this origin before, so a finished
+// reading that could not be saved (offline, say) is kept until it can be.
+let journalOrigin = false;
+try { journalOrigin = localStorage.getItem('tarot-journal') === 'yes'; } catch {}
+
+function keepLocal() {
+  if (!localKey || !spread) return;
+  let list = localReadings().filter(e => e.key !== localKey);
+  const done = isDone();
+  if (placed.length && !readingId && (!done || journalOrigin)) {
+    if (!done) list = list.filter(entryDone);
+    list.unshift({
+      key: localKey, spread: spread.id, variant: variantIndex, placed, deck, cutDone,
+      question: $('question').value, impression: $('impression').value, drawnAt, at: new Date().toISOString(),
+    });
+  }
+  storeLocal(list);
+}
+
+function resumeLocal(e) {
+  if (!validEntry(e)) {
+    dropLocal(e?.key);
+    return showHome();
+  }
+  beginTransition();
+  setupSpread(spreads.find(sp => sp.id === e.spread), e.variant);
+  placed = e.placed;
+  deck = e.deck;
+  cutDone = e.cutDone || isParadox() && placed.length >= 2;
+  fanMode = 'fan';
+  resetJournalState();
+  localKey = e.key;
+  drawnAt = e.drawnAt || (isDone() ? e.at : null);
+  $('question').value = e.question || '';
+  $('impression').value = e.impression || '';
+  renderBoard();
+  renderFan();
+  update();
+  if (isDone()) saveReading();
+}
+
+// Saves finished readings that were kept on this device while the journal was out of reach.
+async function saveKeptReadings() {
+  if (!server.on) return;
+  let saved = 0;
+  for (const e of localReadings()) {
+    if (e.key === localKey || !validEntry(e) || !entryDone(e)) continue;
+    dropLocal(e.key);  // claimed, so the home list cannot open it while it saves
+    const s = spreads.find(sp => sp.id === e.spread);
+    const at = e.drawnAt || e.at;
+    try {
+      await api('readings', {
+        method: 'POST',
+        body: JSON.stringify({
+          spread: e.spread, variant: e.variant, question: (e.question || '').trim(),
+          impression: (e.impression || '').trim(), cards: e.placed, created_at: at,
+          summary: readingText({ spread: s, variant: e.variant, cards: e.placed, question: e.question, impression: e.impression, date: at }),
+        }),
+      });
+      saved++;
+    } catch {
+      storeLocal([...localReadings(), e]);
+      break;
+    }
+  }
+  if (!saved) return;
+  toast(saved === 1 ? 'A reading kept on this device was saved to your journal.' : `${saved} readings kept on this device were saved to your journal.`);
+  if (!$('pickerView').hidden) renderLocal();
+  if (location.hash === '#journal') showJournal(true);
+}
+
+function renderLocal() {
+  const list = $('localList');
+  list.replaceChildren();
+  const entries = localReadings().filter(validEntry);
+  $('localBlock').hidden = !entries.length;
+  entries.forEach(e => {
+    const s = spreads.find(sp => sp.id === e.spread);
+    const total = s.variants[e.variant].positions.length;
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <button class="local-item">
+        <span class="local-name"></span>
+        <span class="local-state"></span>
+        <span class="local-question"></span>
+      </button>
+      <button class="journal-delete" aria-label="Discard this reading"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
+    li.querySelector('.local-name').textContent = s.name + (s.variants.length > 1 ? ` · ${s.variants[e.variant].name}` : '');
+    li.querySelector('.local-state').textContent = entryDone(e)
+      ? `Not yet saved to journal · ${formatDate(e.drawnAt || e.at, { day: 'numeric', month: 'short' })}`
+      : `Unfinished, ${e.placed.length} of ${total} cards · Resume`;
+    li.querySelector('.local-question').textContent = (e.question || '').trim();
+    li.querySelector('.local-item').addEventListener('click', () => resumeLocal(e));
+    li.querySelector('.journal-delete').addEventListener('click', () => {
+      dropLocal(e.key);
+      renderLocal();
+      toast('Reading discarded.', { label: 'Undo', run: () => { storeLocal([e, ...localReadings()]); renderLocal(); } });
+    });
+    list.appendChild(li);
+  });
+}
+
+// The last few spreads finished, newest first, for the home page's "Use again" row.
+function recentSpreads() {
+  try { return JSON.parse(localStorage.getItem('tarot-recent')) || []; } catch { return []; }
+}
+
+function rememberSpread() {
+  const list = recentSpreads().filter(r => r.spread !== spread.id || r.variant !== variantIndex);
+  list.unshift({ spread: spread.id, variant: variantIndex });
+  try { localStorage.setItem('tarot-recent', JSON.stringify(list.slice(0, 4))); } catch {}
+}
+
+function renderRecent() {
+  const row = $('recentRow');
+  row.replaceChildren();
+  const recent = recentSpreads().filter(r => {
+    const s = spreads.find(sp => sp.id === r.spread);
+    return s && Number.isInteger(r.variant) && r.variant >= 0 && r.variant < s.variants.length;
+  });
+  $('recentBlock').hidden = !recent.length;
+  recent.forEach(r => {
+    const s = spreads.find(sp => sp.id === r.spread);
+    const a = document.createElement('a');
+    a.className = 'recent-tile';
+    a.href = spreadHash(s, r.variant);
+    const mini = document.createElement('div');
+    mini.className = 'mini-board';
+    layout(mini, s.variants[r.variant].positions);
+    a.append(mini);
+    a.insertAdjacentHTML('beforeend', '<span class="recent-text"><span class="tile-name"></span><span class="tile-count"></span></span>');
+    a.querySelector('.tile-name').textContent = s.name;
+    a.querySelector('.tile-count').textContent = s.variants.length > 1 ? s.variants[r.variant].name : `${s.variants[r.variant].positions.length} card${s.variants[r.variant].positions.length > 1 ? 's' : ''}`;
+    row.appendChild(a);
+  });
+}
+
 // ---------- views ----------
 
 function showView(name) {
@@ -334,11 +515,15 @@ function setupSpread(s, variant) {
   window.scrollTo(0, 0);
 }
 
-function openSpread(id) {
+function spreadHash(s = spread, v = variantIndex) {
+  return v ? `#${s.id}/${v}` : `#${s.id}`;
+}
+
+function openSpread(id, variant = 0) {
   const s = spreads.find(sp => sp.id === id);
   if (!s) return showHome();
   beginTransition();  // before anything about the old reading is replaced
-  setupSpread(s, 0);
+  setupSpread(s, Number.isInteger(variant) && variant >= 0 ? variant : 0);
   $('question').value = '';
   newReading();
   track(`Spread: ${s.name}`);
@@ -361,22 +546,42 @@ function openSharedReading(params) {
   cutDone = true;
   fanMode = 'fan';
   $('question').value = params.get('q') || '';
+  $('impression').value = '';
+  resetJournalState();
+  localKey = null;
+  drawnAt = null;
   readingId = params.get('id');
-  interpretation = null;
-  ownReading = false;
   verified = !readingId;
-  $('question').readOnly = !verified;
+  setReadOnly(!verified);
   renderBoard();
   renderFan();
   update();
   if (readingId && server.on) loadReading(readingId);
-  else if (readingId) { readingId = null; verified = true; $('question').readOnly = false; update(); }
+  else if (readingId) { readingId = null; verified = true; setReadOnly(false); update(); }
 }
 
 function showHome() {
   beginTransition();
   spread = null;
   showView('picker');
+  renderLocal();
+  renderRecent();
+}
+
+// Clears what belongs to a journal entry, before another reading takes the screen.
+function resetJournalState() {
+  readingId = null;
+  interpretation = null;
+  notes = [];
+  earlier = [];
+  ownReading = false;
+  verified = true;
+  setReadOnly(false);
+}
+
+function setReadOnly(on) {
+  $('question').readOnly = on;
+  $('impression').readOnly = on;
 }
 
 function newReading() {
@@ -385,12 +590,10 @@ function newReading() {
   placed = [];
   fanMode = 'fan';
   cutDone = false;
-  readingId = null;
-  interpretation = null;
-  ownReading = false;
-  verified = true;
-  $('question').readOnly = false;
-  history.replaceState(null, '', `#${spread.id}`);
+  resetJournalState();
+  localKey = crypto.randomUUID?.() ?? String(Math.random()).slice(2);
+  drawnAt = null;
+  $('impression').value = '';
   renderBoard();
   renderFan();
   update();
@@ -434,13 +637,18 @@ function isDone() {
   return placed.length >= positions().length;
 }
 
+// A finished reading drawn here that the journal does not have yet.
+function waitingForJournal() {
+  return isDone() && !readingId && !!localKey && journalOrigin && !saving;
+}
+
 function statusText() {
   const ps = positions();
   if (isDone()) {
-    if (!server.on) return 'The spread is complete.';
     if (readingId) return 'The spread is complete and saved to your journal.';
-    if (saveFailed) return 'The spread is complete, but it could not be saved to the journal.';
     if (saving) return 'The spread is complete. Saving it to your journal…';
+    if (waitingForJournal()) return 'The spread is complete. Not yet saved to journal.';
+    if (saveFailed) return 'The spread is complete, but it could not be saved to the journal.';
     return 'The spread is complete.';
   }
   if (fanMode === 'piles') return 'Choose one of the three packs.';
@@ -474,13 +682,16 @@ function update() {
     list.appendChild(li);
   });
 
+  $('impressionField').hidden = !done;
   $('copyButton').disabled = !done;
   $('linkButton').disabled = !done;
   $('undoButton').disabled = placed.length === 0 || flying || !!interpretation ||
     (readingId && !ownReading) || (isParadox() && placed.length <= 2);
-  if (done) history.replaceState(null, '', `#${shareHash()}`);
+  history.replaceState(null, '', done ? `#${shareHash()}` : spreadHash());
+  keepLocal();
   renderSaved();
   renderInterpretation();
+  renderNotes();
 }
 
 // ---------- the fan ----------
@@ -628,6 +839,10 @@ function pick(cardEl) {
   place(cardEl).then(() => {
     if (!isCurrent(g)) return;
     flying = false;
+    if (isDone()) {
+      drawnAt = new Date().toISOString();
+      rememberSpread();
+    }
     update();
     if (isDone()) saveReading();
   });
@@ -702,7 +917,7 @@ function undo() {
   questionTimer = null;
   const n = placed.pop();
   deck.splice(randomInt(deck.length + 1), 0, n);
-  history.replaceState(null, '', `#${spread.id}`);
+  drawnAt = null;
   renderBoard();
   renderFan();
   update();
@@ -768,13 +983,18 @@ async function detectServer() {
   } catch {
     server.on = false;
   }
+  if (server.on && !journalOrigin) {
+    journalOrigin = true;
+    try { localStorage.setItem('tarot-journal', 'yes'); } catch {}
+  }
   $('journalLink').hidden = !server.on;
 }
 
 async function saveReading() {
   if (!server.on || !spread || readingId || saving || !isDone()) return;
   const g = gen;
-  const question = $('question').value.trim();
+  const words = ownWords();
+  const key = localKey;
   const job = { cancelled: false, final: null };
   pendingSave = job;
   saving = true;
@@ -784,7 +1004,10 @@ async function saveReading() {
   try {
     r = await api('readings', {
       method: 'POST',
-      body: JSON.stringify({ spread: spread.id, variant: variantIndex, question, cards: placed, summary: readingText() }),
+      body: JSON.stringify({
+        spread: spread.id, variant: variantIndex, ...words, cards: placed, summary: readingText(),
+        ...(drawnAt && { created_at: drawnAt }),
+      }),
     });
   } catch {
     if (pendingSave === job) pendingSave = null;
@@ -802,11 +1025,13 @@ async function saveReading() {
     const del = () => api(`readings/${r.id}`, { method: 'DELETE' });
     return del().catch(() => setTimeout(() => del().catch(() => {}), 3000));
   }
+  if (key) dropLocal(key);
   // Left for another view while saving: the reading stays in the journal, with the
-  // question as it was when it was left.
+  // question and impression as they were when it was left.
   if (!isCurrent(g)) {
-    const update = job.final && job.final.question !== question
-      ? api(`readings/${r.id}/question`, { method: 'PUT', body: JSON.stringify(job.final) }).catch(() => {})
+    const changed = job.final && (job.final.question !== words.question || job.final.impression !== words.impression);
+    const update = changed
+      ? api(`readings/${r.id}`, { method: 'PATCH', body: JSON.stringify(job.final) }).catch(() => {})
       : Promise.resolve();
     // If the journal is what was opened meanwhile, it loaded before this entry existed.
     update.then(() => { if (location.hash === '#journal') showJournal(true); });
@@ -815,7 +1040,8 @@ async function saveReading() {
   saving = false;
   readingId = r.id;
   ownReading = true;
-  if ($('question').value.trim() !== question) sendQuestion();
+  const now = ownWords();
+  if (now.question !== words.question || now.impression !== words.impression) sendEdits();
   update();
   startPolling();
 }
@@ -827,33 +1053,35 @@ function discardSaved() {
   if (server.on && id) api(`readings/${id}`, { method: 'DELETE' }).catch(() => {});
 }
 
+// The question and the first impression; both are saved the same way.
 let questionTimer = null;
-function onQuestionInput() {
+function onWordsInput() {
   if (isDone()) history.replaceState(null, '', `#${shareHash()}`);
-  if (!readingId || !verified) return;  // a save in progress picks the new question up when it lands
+  keepLocal();
+  if (!readingId || !verified) return;  // a save in progress picks the new words up when it lands
   clearTimeout(questionTimer);
   const g = gen, id = readingId;
   questionTimer = setTimeout(() => {
     questionTimer = null;
-    if (isCurrent(g) && readingId === id) sendQuestion();
+    if (isCurrent(g) && readingId === id) sendEdits();
   }, 700);
 }
 
-// Question writes go out one at a time, so a slow earlier one can never land after a
-// later one and overwrite it.
+// Edits go out one at a time, so a slow earlier one can never land after a later one
+// and overwrite it.
 let questionChain = Promise.resolve();
-function sendQuestion() {
+function sendEdits() {
   if (!readingId || !verified) return;
   let body;
   try {
-    body = JSON.stringify({ question: $('question').value.trim(), summary: readingText() });
+    body = JSON.stringify({ ...ownWords(), summary: readingText() });
   } catch {
     return;  // only reachable if the reading is incomplete; nothing sensible to send
   }
   const id = readingId;
   questionChain = questionChain
-    .then(() => api(`readings/${id}/question`, { method: 'PUT', body }))
-    .catch(() => toast('Could not save the question to the journal.'));
+    .then(() => api(`readings/${id}`, { method: 'PATCH', body }))
+    .catch(() => toast('Could not save your words to the journal.'));
 }
 
 async function loadReading(id) {
@@ -865,13 +1093,13 @@ async function loadReading(id) {
     if (!isCurrent(g) || readingId !== id) return;
     readingId = null;
     verified = true;
-    $('question').readOnly = false;
+    setReadOnly(false);
     update();
     return;
   }
   if (!isCurrent(g) || readingId !== id) return;
   verified = true;
-  $('question').readOnly = false;
+  setReadOnly(false);
   // A link whose cards were edited by hand must not pass for the saved reading.
   if (r.spread !== spread.id || r.variant !== variantIndex || r.cards.join('-') !== placed.join('-')) {
     const link = readingLink(r);
@@ -879,7 +1107,10 @@ async function loadReading(id) {
     return openSharedReading(new URLSearchParams(link.slice(3)));
   }
   $('question').value = r.question;
+  $('impression').value = r.impression || '';
   interpretation = r.interpretation ? { text: r.interpretation, at: r.interpreted_at } : null;
+  earlier = r.earlier || [];
+  notes = r.notes || [];
   update();
   startPolling();
 }
@@ -900,6 +1131,7 @@ function startPolling() {
     if (interpretation && interpretation.at === r.interpreted_at && interpretation.text === r.interpretation) return;
     const first = !interpretation;
     interpretation = { text: r.interpretation, at: r.interpreted_at };
+    earlier = r.earlier || [];
     update();
     toast(first ? "Claude's interpretation has arrived." : 'The interpretation was updated.');
     if (first) $('interpretation').scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth' });
@@ -913,8 +1145,11 @@ function stopPolling() {
 
 function renderSaved() {
   const note = $('savedNote');
-  note.hidden = !readingId;
+  const waiting = waitingForJournal();
+  note.hidden = !readingId && !waiting;
+  note.classList.toggle('waiting', waiting);
   if (readingId) note.textContent = interpretation ? 'Saved in your journal.' : 'Saved in your journal. Ask Claude to interpret your latest reading, and it appears here.';
+  else if (waiting) note.textContent = 'Not yet saved to journal. It stays on this device and is saved once the journal can be reached.';
 }
 
 function renderInterpretation() {
@@ -923,6 +1158,91 @@ function renderInterpretation() {
   if (!interpretation) return;
   $('interpretationMeta').textContent = `Claude · ${formatDate(interpretation.at)}`;
   $('interpretationText').innerHTML = renderMarkdown(interpretation.text);
+  // Rebuilt only when it changes, so an open "Earlier version" stays open.
+  const versions = $('earlierVersions');
+  const key = earlier.map(e => e.interpreted_at).join('|');
+  if (versions.dataset.key === key) return;
+  versions.dataset.key = key;
+  versions.replaceChildren(...earlier.map(e => {
+    const d = document.createElement('details');
+    d.className = 'earlier';
+    d.innerHTML = '<summary></summary><div class="earlier-text"></div>';
+    d.querySelector('summary').textContent = `Earlier version · ${formatDate(e.interpreted_at)}`;
+    d.querySelector('.earlier-text').innerHTML = renderMarkdown(e.text);
+    return d;
+  }));
+}
+
+// ---------- coming back to a reading ----------
+
+let notePrompt = '';
+
+function setNotePrompt(prompt) {
+  notePrompt = prompt;
+  document.querySelectorAll('#notePrompts .chip').forEach(c => c.setAttribute('aria-pressed', String(c.textContent === prompt)));
+  $('noteText').placeholder = prompt || 'A note for today';
+}
+
+function renderNotes() {
+  $('notes').hidden = !readingId || !server.on;
+  if ($('notes').hidden) return;
+  const list = $('noteList');
+  list.replaceChildren(...notes.map(n => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <p class="note-meta"></p>
+      <p class="note-text"></p>
+      <button class="journal-delete" aria-label="Delete this note"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
+    li.querySelector('.note-meta').textContent = formatDate(n.created_at) + (n.prompt ? ` · ${n.prompt}` : '');
+    li.querySelector('.note-text').textContent = n.text;
+    li.querySelector('.journal-delete').addEventListener('click', () => deleteNote(n));
+    return li;
+  }));
+}
+
+async function addNote() {
+  const text = $('noteText').value.trim();
+  if (!text || !readingId) return;
+  const g = gen, id = readingId;
+  $('noteSave').disabled = true;
+  try {
+    const n = await api(`readings/${id}/notes`, { method: 'POST', body: JSON.stringify({ prompt: notePrompt, text }) });
+    if (!isCurrent(g) || readingId !== id) return;
+    notes.push(n);
+    $('noteText').value = '';
+    setNotePrompt('');
+    renderNotes();
+  } catch {
+    if (isCurrent(g)) toast('Could not save the note.');
+  } finally {
+    $('noteSave').disabled = false;
+  }
+}
+
+async function deleteNote(n) {
+  const g = gen, id = readingId;
+  try {
+    await api(`readings/${id}/notes/${n.id}`, { method: 'DELETE' });
+  } catch {
+    return toast('Could not delete the note.');
+  }
+  if (!isCurrent(g) || readingId !== id) return;
+  notes = notes.filter(x => x !== n);
+  renderNotes();
+  toast('Note deleted.', {
+    label: 'Undo',
+    run: async () => {
+      let back;
+      try {
+        back = await api(`readings/${id}/notes`, { method: 'POST', body: JSON.stringify(n) });
+      } catch {
+        return toast('Could not restore the note.');
+      }
+      if (!isCurrent(g) || readingId !== id) return;
+      notes = [...notes, back].sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id - b.id));
+      renderNotes();
+    },
+  });
 }
 
 // `refresh` keeps the scroll position, for reloading the list in place after a delete.
@@ -942,8 +1262,53 @@ async function showJournal(refresh = false) {
     return;
   }
   if (!isCurrent(g)) return;
-  renderPatterns(readings);
-  renderJournalList(readings);
+  journalReadings = readings;
+  if (!refresh) {
+    $('journalSearch').value = '';
+    selectedCard = null;
+  }
+  renderJournalSummary(readings);
+  renderRecurring(readings);
+  renderJournalList();
+  renderSuits(readings);
+}
+
+let journalReadings = [];
+let selectedCard = null;  // the recurring card whose readings are listed
+
+// Case and accents are ignored, Turkish dotless i included, so "isik" finds "Işık".
+function fold(text) {
+  return text.toLocaleLowerCase('tr').normalize('NFD').replace(/\p{M}/gu, '').replace(/ı/g, 'i');
+}
+
+// What a search looks through, the question first.
+function searchable(r) {
+  return [
+    r.question,
+    r.impression,
+    ...(r.notes || []).flatMap(n => [n.prompt, n.text]),
+    r.interpretation,
+    ...(r.earlier || []).map(e => e.text),
+  ].filter(Boolean);
+}
+
+// A short piece of text around the first match, for matches outside the question.
+function excerpt(text, term) {
+  const at = fold(text).indexOf(term);
+  const start = Math.max(0, at - 40);
+  const piece = text.slice(start, at + term.length + 80).replace(/\s+/g, ' ').trim();
+  return `${start > 0 ? '…' : ''}${piece}${at + term.length + 80 < text.length ? '…' : ''}`;
+}
+
+function renderJournalSummary(readings) {
+  const drawn = readings.flatMap(r => r.cards);
+  if (!readings.length) {
+    $('journalSummary').textContent = 'No readings yet. Finished readings are saved here automatically.';
+    return;
+  }
+  const first = readings[readings.length - 1].created_at;
+  $('journalSummary').textContent =
+    `${readings.length} reading${readings.length > 1 ? 's' : ''}, ${drawn.length} cards drawn since ${formatDate(first)}.`;
 }
 
 function readingLink(r) {
@@ -953,9 +1318,15 @@ function readingLink(r) {
   return `#r?${p}`;
 }
 
-function renderJournalList(readings) {
+function renderJournalList() {
   const list = $('journalList');
   list.replaceChildren();
+  const term = fold($('journalSearch').value.trim());
+  const readings = term
+    ? journalReadings.filter(r => searchable(r).some(t => fold(t).includes(term)))
+    : journalReadings;
+  $('searchCount').hidden = !term;
+  $('searchCount').textContent = `${readings.length} of ${journalReadings.length} readings`;
   readings.forEach(r => {
     const s = spreads.find(sp => sp.id === r.spread);
     const li = document.createElement('li');
@@ -964,12 +1335,20 @@ function renderJournalList(readings) {
         <span class="journal-meta"><span class="journal-date"></span><span class="journal-spread"></span></span>
         <span class="journal-question"></span>
         <span class="journal-cards"></span>
+        <span class="journal-match" hidden></span>
       </a>
       <button class="journal-delete" aria-label="Delete this reading"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
     li.querySelector('a').href = readingLink(r);
     li.querySelector('.journal-date').textContent = formatDate(r.created_at, { day: 'numeric', month: 'short', year: 'numeric' });
-    li.querySelector('.journal-spread').textContent = (s ? s.name : r.spread) + (r.interpretation ? ' · interpreted' : '');
+    const noteCount = (r.notes || []).length;
+    li.querySelector('.journal-spread').textContent = (s ? s.name : r.spread) + (r.interpretation ? ' · interpreted' : '') +
+      (noteCount ? ` · ${noteCount} note${noteCount > 1 ? 's' : ''}` : '');
     li.querySelector('.journal-question').textContent = r.question || 'No question';
+    const hit = term && !fold(r.question).includes(term) && searchable(r).find(t => fold(t).includes(term));
+    if (hit) {
+      li.querySelector('.journal-match').hidden = false;
+      li.querySelector('.journal-match').textContent = excerpt(hit, term);
+    }
     const cardsEl = li.querySelector('.journal-cards');
     r.cards.forEach(n => {
       const img = document.createElement('img');
@@ -1002,21 +1381,12 @@ async function deleteFromJournal(id) {
   });
 }
 
-// Suit shares against what an even draw would give, and the cards that keep returning.
-function renderPatterns(readings) {
-  const box = $('patterns');
-  box.replaceChildren();
+// Suit shares against what an even draw would give.
+function renderSuits(readings) {
+  const suits = $('suitsBlock');
   const drawn = readings.flatMap(r => r.cards);
-  if (!readings.length) {
-    $('journalSummary').textContent = 'No readings yet. Finished readings are saved here automatically.';
-    return;
-  }
-  const first = readings[readings.length - 1].created_at;
-  $('journalSummary').textContent =
-    `${readings.length} reading${readings.length > 1 ? 's' : ''}, ${drawn.length} cards drawn since ${formatDate(first)}.`;
-
-  const suits = document.createElement('div');
-  suits.className = 'pattern-block';
+  suits.hidden = !readings.length;
+  if (!readings.length) return;
   suits.innerHTML = '<h2>Suits</h2><p class="pattern-note">Share of all cards drawn. The tick marks what a perfectly even draw would give.</p>';
   const max = Math.max(...SUITS.map(s => Math.max(drawn.filter(n => suitOf(n) === s).length / drawn.length, SUIT_SIZE[s] / TOTAL_CARDS)));
   SUITS.forEach(s => {
@@ -1036,8 +1406,13 @@ function renderPatterns(readings) {
     row.querySelector('.suit-value').textContent = `${Math.round(share * 100)}% · ${count}`;
     suits.appendChild(row);
   });
-  box.appendChild(suits);
+}
 
+// The cards that keep returning; choosing one lists the readings it appeared in.
+function renderRecurring(readings) {
+  const rec = $('recurringBlock');
+  rec.hidden = !readings.length;
+  if (!readings.length) return;
   const counts = new Map();
   readings.forEach(r => r.cards.forEach(n => {
     const c = counts.get(n) || { n, count: 0, last: r.created_at };
@@ -1046,8 +1421,7 @@ function renderPatterns(readings) {
     counts.set(n, c);
   }));
   const recurring = [...counts.values()].filter(c => c.count > 1).sort((a, b) => b.count - a.count || (b.last > a.last ? 1 : -1)).slice(0, 12);
-  const rec = document.createElement('div');
-  rec.className = 'pattern-block';
+  if (!recurring.some(c => c.n === selectedCard)) selectedCard = null;
   rec.innerHTML = '<h2>Cards that keep coming back</h2>';
   if (!recurring.length) {
     rec.insertAdjacentHTML('beforeend', '<p class="pattern-note">No card has come up twice yet.</p>');
@@ -1057,16 +1431,41 @@ function renderPatterns(readings) {
     recurring.forEach(c => {
       const b = document.createElement('button');
       b.className = 'recurring-card';
+      b.setAttribute('aria-pressed', String(c.n === selectedCard));
       b.innerHTML = '<img alt=""><span class="recurring-name"></span><span class="recurring-count"></span>';
       b.querySelector('img').src = cardThumb(c.n);
       b.querySelector('.recurring-name').textContent = cardName(c.n);
       b.querySelector('.recurring-count').textContent = `${c.count} times · last ${formatDate(c.last, { day: 'numeric', month: 'short' })}`;
-      b.addEventListener('click', () => openCard(c.n, null));
+      b.addEventListener('click', () => {
+        selectedCard = selectedCard === c.n ? null : c.n;
+        renderRecurring(journalReadings);
+      });
       grid.appendChild(b);
     });
     rec.appendChild(grid);
+    if (selectedCard) rec.appendChild(cardReadings(selectedCard, readings));
   }
-  box.appendChild(rec);
+}
+
+// The readings a card appeared in: date, question and the position it held.
+function cardReadings(n, readings) {
+  const box = document.createElement('div');
+  box.className = 'card-readings';
+  box.innerHTML = '<div class="card-readings-head"><h3></h3><button class="ghost">Read the card</button></div><ul></ul>';
+  box.querySelector('h3').textContent = `${cardName(n)} appeared in`;
+  box.querySelector('button').addEventListener('click', () => openCard(n, null));
+  readings.filter(r => r.cards.includes(n)).forEach(r => {
+    const i = r.cards.indexOf(n);
+    const label = spreads.find(sp => sp.id === r.spread)?.variants[r.variant]?.positions[i]?.label;
+    const li = document.createElement('li');
+    li.innerHTML = '<a><span class="journal-date"></span><span class="card-readings-question"></span><span class="card-readings-position"></span></a>';
+    li.querySelector('a').href = readingLink(r);
+    li.querySelector('.journal-date').textContent = formatDate(r.created_at, { day: 'numeric', month: 'short', year: 'numeric' });
+    li.querySelector('.card-readings-question').textContent = r.question || 'No question';
+    li.querySelector('.card-readings-position').textContent = `Position ${i + 1}${label ? ` · ${label}` : ''}`;
+    box.querySelector('ul').appendChild(li);
+  });
+  return box;
 }
 
 // ---------- copy for Claude ----------
@@ -1081,15 +1480,24 @@ const DECK_NOTE = [
   "Treat the cards and Osho's words as a mirror for reflection, not as facts, predictions, or medical or psychological diagnoses, and read positions about the future or past lives in that same reflective way.",
 ].join(' ');
 
-function readingText() {
-  const ps = positions();
-  const question = $('question').value.trim();
-  const variant = spread.variants[variantIndex];
+// From this many cards on, a spread gets a synthesis rather than a reading of every card.
+const BIG_SPREAD = 6;
+
+function currentReading() {
+  return { spread, variant: variantIndex, cards: placed, ...ownWords(), date: drawnAt };
+}
+
+function readingText({ spread, variant: v, cards, question = '', impression = '', date } = currentReading()) {
+  const variant = spread.variants[v];
+  const ps = variant.positions;
+  question = question.trim();
+  impression = impression.trim();
   const clean = t => t.replace(/\r\n/g, '\n').trim();
   const lines = [
-    `Osho Zen Tarot reading, ${new Date().toISOString().slice(0, 10)}`,
+    `Osho Zen Tarot reading, ${(date ? new Date(date) : new Date()).toISOString().slice(0, 10)}`,
     '',
     `Question: ${question || '(none; read it as a general reading for here and now)'}`,
+    ...(impression ? ['', `My first impression, written before reading the card texts: ${impression}`] : []),
     '',
     `Spread: ${spread.name}${variant.name ? ` (${variant.name})` : ''}`,
     spread.intro,
@@ -1097,10 +1505,10 @@ function readingText() {
     DECK_NOTE,
     '',
     'Cards, by position:',
-    ...ps.map((p, i) => `${i + 1}. ${p.label}: ${cardName(placed[i])} (${cardRank(placed[i])})`),
+    ...ps.map((p, i) => `${i + 1}. ${p.label}: ${cardName(cards[i])} (${cardRank(cards[i])})`),
   ];
   ps.forEach((p, i) => {
-    const n = placed[i];
+    const n = cards[i];
     lines.push(
       '',
       '---',
@@ -1121,10 +1529,17 @@ function readingText() {
     '',
     'Please interpret this reading, as a conversation rather than a verdict. If the question is ' +
     'unclear, or you need more context about my situation to read the cards well, ask me first: ' +
-    'a few short questions at a time, and wait for my answers before interpreting. Then read each ' +
-    'card in the light of its position and of the texts above, and bring them together into one ' +
-    'answer to the question. Afterwards, offer to go deeper into any card or any part of the ' +
-    'answer. Reply in the language of the question.',
+    'a few short questions at a time, and wait for my answers before interpreting. ' +
+    (impression ? 'Start from my first impression: it is what I saw in the cards before any explanation. ' : '') +
+    (ps.length >= BIG_SPREAD
+      ? 'This is a big spread, so rather than an essay on every card, give a short synthesis in the light ' +
+        'of the positions and the texts above, name one or two tensions between the cards, and end with a ' +
+        'question back to me. '
+      : 'Then read each card in the light of its position and of the texts above, and bring them together ' +
+        'into one answer to the question. ') +
+    'Positions about another person are lenses, not mind-reading. If a card does not fit my life, ' +
+    'a mismatch is information, not resistance. Afterwards, offer to go deeper into any card or any ' +
+    'part of the answer. Reply in the language of the question.',
   );
   return lines.join('\n');
 }
@@ -1154,7 +1569,16 @@ function toast(message, action) {
 
 // ---------- dialogs ----------
 
+let detailIndex = null;  // the position shown in the card window, if it was opened from one
+
 function openCard(n, positionIndex) {
+  detailIndex = positionIndex;
+  const multi = positionIndex != null && placed.length > 1;
+  $('detailPrev').hidden = $('detailNext').hidden = !multi;
+  if (multi) {
+    $('detailPrev').disabled = positionIndex === 0;
+    $('detailNext').disabled = positionIndex >= placed.length - 1;
+  }
   const img = $('detailImage');
   img.onerror = () => { img.onerror = null; img.src = cardThumb(n); };  // offline: the thumbnail is cached
   img.src = cardImage(n);
@@ -1168,6 +1592,13 @@ function openCard(n, positionIndex) {
   const dialog = $('cardDialog');
   if (!dialog.open) dialog.showModal();
   dialog.querySelector('.card-detail-text').scrollTop = 0;
+  dialog.scrollTop = 0;
+}
+
+function stepCard(delta) {
+  const i = detailIndex == null ? -1 : detailIndex + delta;
+  if (i < 0 || i >= placed.length) return;
+  openCard(placed[i], i);
 }
 
 function renderBrowse() {
@@ -1225,13 +1656,24 @@ function track(name) {
 
 // ---------- wiring ----------
 
-function route() {
+// `initial` is the first route after the page loads: a reading kept on this device that
+// matches the address is resumed rather than started again.
+function route(initial = false) {
   let h;
   try { h = decodeURIComponent(location.hash.slice(1)); } catch { return showHome(); }
   if (!h) return showHome();
   if (h === 'journal') return showJournal();
-  if (h.startsWith('r?')) return openSharedReading(new URLSearchParams(location.hash.slice(3)));
-  openSpread(h);
+  const kept = initial ? localReadings().filter(validEntry) : [];
+  if (h.startsWith('r?')) {
+    const params = new URLSearchParams(location.hash.slice(3));
+    const e = !params.get('id') && kept.find(x => x.spread === params.get('s') &&
+      String(x.variant) === (params.get('v') ?? '0') && x.placed.join('-') === params.get('c'));
+    return e ? resumeLocal(e) : openSharedReading(params);
+  }
+  const [id, v = '0'] = h.split('/');
+  const e = kept.find(x => x.spread === id && String(x.variant) === v && !entryDone(x));
+  if (e) return resumeLocal(e);
+  openSpread(id, Number(v));
 }
 
 document.querySelectorAll('dialog').forEach(d => {
@@ -1246,12 +1688,28 @@ $('soundButton').addEventListener('click', toggleSound);
 $('copyButton').addEventListener('click', () => copyText(readingText(), 'Reading copied.'));
 $('linkButton').addEventListener('click', () => copyText(location.href, 'Link copied.'));
 $('undoButton').addEventListener('click', undo);
-$('resetButton').addEventListener('click', newReading);
+$('resetButton').addEventListener('click', () => {
+  // Starting over on purpose: the unfinished reading need not be offered again.
+  if (localKey && !isDone()) dropLocal(localKey);
+  newReading();
+});
 $('shuffleButton').addEventListener('click', shuffleDeck);
 $('cutButton').addEventListener('click', cutDeck);
 $('variantSelect').addEventListener('change', changeVariant);
-$('question').addEventListener('input', onQuestionInput);
-window.addEventListener('hashchange', route);
+$('question').addEventListener('input', onWordsInput);
+$('impression').addEventListener('input', onWordsInput);
+$('detailPrev').addEventListener('click', () => stepCard(-1));
+$('detailNext').addEventListener('click', () => stepCard(1));
+$('cardDialog').addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') stepCard(-1);
+  if (e.key === 'ArrowRight') stepCard(1);
+});
+document.querySelectorAll('#notePrompts .chip').forEach(c => {
+  c.addEventListener('click', () => setNotePrompt(notePrompt === c.textContent ? '' : c.textContent));
+});
+$('noteSave').addEventListener('click', addNote);
+$('journalSearch').addEventListener('input', () => renderJournalList());
+window.addEventListener('hashchange', () => route());
 new ResizeObserver(() => { if (spread) layoutFan(); }).observe($('fan'));
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
@@ -1265,4 +1723,7 @@ document.addEventListener('pointerdown', () => { if (sound.on) audio(); }, { onc
 renderDaily();
 renderPicker();
 renderBrowse();
-detectServer().then(route);
+detectServer().then(() => {
+  route(true);
+  saveKeptReadings();
+});
