@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 COPYFILE_DISABLE=1 tar --no-xattrs -czf - \
   index.html styles.css script.js sw.js manifest.webmanifest js \
   assets/CardPictures assets/CardText assets/CardCommentary assets/UserGuide \
-  assets/icons assets/EBGaramond.ttf assets/favicon.ico \
+  assets/icons assets/sounds assets/EBGaramond.ttf assets/favicon.ico \
   server/app.py server/tarot.service |
   ssh "$HOST" 'cat > /tmp/tarot-deploy.tgz'
 

@@ -1,8 +1,8 @@
 // sw.js: makes the site work offline once it has been opened.
 // The page's own files are network-first, so an update shows up on the next visit;
-// card images are cache-first, since they never change. The journal API is never cached.
+// card images and sounds are cache-first, since they never change. The journal API is never cached.
 
-const CACHE = 'tarot-v1';
+const CACHE = 'tarot-v2';
 
 const SHELL = [
   './',
@@ -16,6 +16,8 @@ const SHELL = [
   'assets/favicon.ico',
   'assets/icons/icon-192.png',
   ...Array.from({ length: 79 }, (_, i) => `assets/CardPictures/small/card_${i + 1}.webp`),
+  ...['shuffle', 'fan', 'slide-1', 'slide-2', 'slide-3', 'place-1', 'place-2', 'place-3', 'place-4',
+    'shove-1', 'shove-2', 'coin-flick', 'coin-land'].map(name => `assets/sounds/${name}.mp3`),
 ];
 
 self.addEventListener('install', event => {
@@ -35,8 +37,8 @@ self.addEventListener('fetch', event => {
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.includes('/api/')) return;
 
-  const isImage = url.pathname.includes('/assets/CardPictures/');
-  event.respondWith(isImage ? cacheFirst(req) : networkFirst(req));
+  const isMedia = url.pathname.includes('/assets/CardPictures/') || url.pathname.includes('/assets/sounds/');
+  event.respondWith(isMedia ? cacheFirst(req) : networkFirst(req));
 });
 
 async function cacheFirst(req) {

@@ -127,7 +127,20 @@ function formatDate(iso, opts = { day: 'numeric', month: 'long', year: 'numeric'
 
 // ---------- sound ----------
 
-const sound = { on: false, ctx: null };
+// Recorded effects (see the README for sources, all CC0). Several takes per action, so
+// repeated draws do not sound identical.
+const SOUNDS = {
+  shuffle: ['shuffle'],
+  fan: ['fan'],
+  slide: ['slide-1', 'slide-2', 'slide-3'],
+  place: ['place-1', 'place-2', 'place-3', 'place-4'],
+  cut: ['shove-1', 'shove-2'],
+  coinFlick: ['coin-flick'],
+  coinLand: ['coin-land'],
+};
+const SOUND_GAIN = 0.7;
+
+const sound = { on: false, ctx: null, buffers: {}, loading: null };
 try { sound.on = localStorage.getItem('tarot-sound') === 'on'; } catch {}
 
 function audio() {
@@ -136,64 +149,44 @@ function audio() {
   return sound.ctx;
 }
 
-function noise(dur, freq, gain, when = 0, q = 1) {
+function loadSounds() {
+  if (sound.loading) return sound.loading;
   const ctx = audio();
-  const t = ctx.currentTime + when;
-  const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'bandpass';
-  filter.frequency.value = freq;
-  filter.Q.value = q;
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(gain, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  src.connect(filter).connect(g).connect(ctx.destination);
-  src.start(t);
+  sound.loading = Promise.all(Object.values(SOUNDS).flat().map(async name => {
+    const res = await fetch(`assets/sounds/${name}.mp3`);
+    sound.buffers[name] = await ctx.decodeAudioData(await res.arrayBuffer());
+  })).catch(() => { sound.loading = null; });
+  return sound.loading;
 }
 
-function tone(freq, dur, gain, when = 0, type = 'sine') {
-  const ctx = audio();
-  const t = ctx.currentTime + when;
-  const osc = ctx.createOscillator();
-  osc.type = type;
-  osc.frequency.value = freq;
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(gain, t + 0.005);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  osc.connect(g).connect(ctx.destination);
-  osc.start(t);
-  osc.stop(t + dur + 0.05);
-}
-
-function play(name) {
+function play(name, delay = 0) {
   if (!sound.on) return;
+  const takes = SOUNDS[name];
+  const buffer = takes && sound.buffers[takes[randomInt(takes.length)]];
+  if (!buffer) return;
   try {
-    if (name === 'flip') noise(0.07, 2600, 0.35);
-    if (name === 'place') { tone(140, 0.12, 0.12); noise(0.05, 700, 0.12); }
-    if (name === 'shuffle') for (let i = 0; i < 16; i++) noise(0.035, 2200 + Math.random() * 1600, 0.15, i * 0.03);
-    if (name === 'cut') { noise(0.09, 1100, 0.25); noise(0.09, 1100, 0.2, 0.12); }
-    if (name === 'coin') {
-      tone(2600, 0.6, 0.06); tone(3900, 0.45, 0.04);
-      for (let i = 0; i < 3; i++) tone(2400 - i * 200, 0.25, 0.05 - i * 0.012, 1.12 + i * 0.07);
-    }
+    const ctx = audio();
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const gain = ctx.createGain();
+    gain.gain.value = SOUND_GAIN;
+    src.connect(gain).connect(ctx.destination);
+    src.start(ctx.currentTime + delay);
   } catch {}
 }
 
 function renderSoundButton() {
-  $('soundButton').textContent = sound.on ? 'Sound on' : 'Sound off';
-  $('soundButton').setAttribute('aria-pressed', String(sound.on));
+  const b = $('soundButton');
+  b.querySelector('span').textContent = sound.on ? 'Sound: on' : 'Sound: off';
+  b.setAttribute('aria-pressed', String(sound.on));
+  b.classList.toggle('on', sound.on);
 }
 
 function toggleSound() {
   sound.on = !sound.on;
   try { localStorage.setItem('tarot-sound', sound.on ? 'on' : 'off'); } catch {}
   renderSoundButton();
-  play('flip');
+  if (sound.on) loadSounds().then(() => play('place'));
 }
 
 // ---------- layout geometry ----------
@@ -353,6 +346,7 @@ function newReading() {
   renderBoard();
   renderFan();
   update();
+  play('fan');
 }
 
 function renderBoard() {
@@ -382,7 +376,7 @@ function fillSlot(slot, n, animate) {
   const card = slot.querySelector('.card3d');
   card.addEventListener('click', () => openCard(n, Number(slot.dataset.index)));
   if (animate) {
-    requestAnimationFrame(() => requestAnimationFrame(() => { card.classList.add('flipped'); play('flip'); }));
+    requestAnimationFrame(() => requestAnimationFrame(() => card.classList.add('flipped')));
   } else {
     card.classList.add('flipped');
   }
@@ -518,13 +512,15 @@ function shuffleDeck() {
   cards.forEach(c => {
     c.style.transform = `translate(${W / 2 - cw / 2 + (Math.random() - 0.5) * 30}px, 20px) rotate(${(Math.random() - 0.5) * 16}deg)`;
   });
+  // The cards stay gathered for the length of the riffle, then fan out again.
   setTimeout(() => {
     deck = shuffle(deck);
     cards.forEach((c, i) => { c.dataset.card = deck[i]; });
     layoutFan();
+    play('fan');
     flying = false;
     update();
-  }, reducedMotion.matches ? 0 : 450);
+  }, reducedMotion.matches ? 0 : 850);
 }
 
 function cutDeck() {
@@ -582,6 +578,7 @@ function place(cardEl) {
   const n = Number(cardEl.dataset.card);
   const index = placed.length;
   const slot = slotAt(index);
+  play('slide');
   deck = deck.filter(c => c !== n);
   placed.push(n);
   new Image().src = cardThumb(n);
@@ -1033,7 +1030,8 @@ function flipCoin() {
   stage.classList.add('toss');
   $('coinResult').textContent = '';
   $('flipAgain').disabled = true;
-  play('coin');
+  play('coinFlick');
+  play('coinLand', 1.08);
   setTimeout(() => {
     coin.dataset.side = heads ? 'heads' : 'tails';
     $('coinResult').textContent = heads ? 'Heads' : 'Tails';
@@ -1083,6 +1081,9 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 renderSoundButton();
+if (sound.on) loadSounds();
+// Browsers start audio suspended until the first tap or click.
+document.addEventListener('pointerdown', () => { if (sound.on) audio(); }, { once: true });
 renderDaily();
 renderPicker();
 renderBrowse();

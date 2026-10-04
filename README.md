@@ -22,6 +22,7 @@ It runs in two places from the same code:
 | `assets/CardPictures/` | Full-size card images; `small/` holds the 420px WebP copies used everywhere but the detail view |
 | `assets/CardText/`, `assets/CardCommentary/` | The same texts as plain files, for Claude to read |
 | `assets/UserGuide/guide.md` | The deck's guidebook: suits, symbols, how to ask |
+| `assets/sounds/` | Sound effects, trimmed and levelled from CC0 recordings (credits below) |
 | `sw.js`, `manifest.webmanifest`, `assets/icons/` | Offline use and installing on a phone's home screen |
 | `server/` | The journal server, its systemd unit, and the deploy script |
 
@@ -90,3 +91,11 @@ or asks Claude to do a reading:
    within seconds. Give the interpretation in the chat too.
 
 The "Copy reading" text asks an outside assistant to work the same way.
+
+## Credits
+
+Sound effects, all CC0 (public domain), trimmed and levelled for the site:
+
+- Card shuffle, fan, slide, place and push: *Casino Audio* by Kenney, https://kenney.nl/assets/casino-audio
+- Coin flick: *Coin Sounds* by syncopika, https://opengameart.org/node/33019
+- Coin landing: *Coin Drop* by Vinrax, https://opengameart.org/content/coin-drop

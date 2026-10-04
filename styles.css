@@ -469,6 +469,13 @@ dialog::backdrop { background: rgba(5, 4, 8, 0.75); backdrop-filter: blur(3px); 
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 
+.sound-button { display: inline-flex; align-items: center; gap: 6px; }
+.sound-button svg { width: 18px; height: 18px; }
+.sound-button .waves { display: none; }
+.sound-button.on { border-color: var(--gold); color: var(--gold); }
+.sound-button.on .waves { display: inline; }
+.sound-button.on .mute { display: none; }
+
 /* ---------- card of the day ---------- */
 
 .daily {
