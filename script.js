@@ -309,6 +309,14 @@ function renderPicker() {
     tile.insertAdjacentHTML('beforeend', '<span class="tile-name"></span><span class="tile-count"></span>');
     tile.querySelector('.tile-name').textContent = s.name;
     tile.querySelector('.tile-count').textContent = count;
+    if (s.hint) {
+      const hint = document.createElement('span');
+      hint.className = 'tile-hint';
+      hint.innerHTML = '<span></span><span class="tile-use"></span>';
+      hint.firstChild.textContent = s.hint[0];
+      hint.lastChild.textContent = s.hint[1];
+      tile.appendChild(hint);
+    }
     grid.appendChild(tile);
   });
 }

@@ -2,6 +2,7 @@
 // Each spread has one or more variants; a variant is a list of positions.
 // Coordinates are card centers in card units: a card is 1 wide and 1.5 tall.
 // Positions are listed in drawing order (position 1 first).
+// `hint` is what the spread is and what to use it for, shown when hovering its tile.
 
 function P(label, x, y, rot = 0) {
   return { label, x, y, rot };
@@ -64,18 +65,21 @@ const threeCardVariants = [
 const spreads = [
   {
     id: 'single',
+    hint: ['One card, one insight.', 'Use it for a quick look at today, or something to sit with in meditation.'],
     name: 'A Single Card',
     intro: 'For insights into any situation that relates to your living today. Or as a basis for meditating now.',
     variants: [{ positions: [P('The insight', 0, 0)] }],
   },
   {
     id: 'three-card',
+    hint: ['Three cards in a row, in many variations: past to future, problem to method, strengths to advice.', 'Use it for a clear question you want to see from three sides.'],
     name: 'Three Card Spread',
     intro: 'There are many variations of the three card spread. Choose the one that fits your question. Linear spreads follow a line from one card to the next; balanced spreads look at three sides of one thing; foundational spreads read as one sentence ("given your strengths and your weaknesses, this is my advice"); crossed spreads set a situation against what stands in its way.',
     variants: threeCardVariants,
   },
   {
     id: 'relating',
+    hint: ['You, the other, what happens between you, and an insight.', 'Use it for a quick look at any relationship: partner, friend, family, boss.'],
     name: 'Relating: "A Quickie"',
     intro: 'This spread offers a spontaneous insight into your relating with the other, whether "the other" is the boss, the lover, the friend, the sister, the parent...',
     variants: [{
@@ -89,6 +93,7 @@ const spreads = [
   },
   {
     id: 'diamond',
+    hint: ['The issue, what you can and cannot see around it, what is needed, and the resolution.', 'Use it for getting clarity on one specific problem.'],
     name: 'The Diamond',
     intro: 'This layout can be helpful in bringing more clarity to a specific issue.',
     variants: [{
@@ -103,6 +108,7 @@ const spreads = [
   },
   {
     id: 'flying-bird',
+    hint: ['Seven cards from resistance and fear, through support and acceptance, to a new level of awareness.', 'Use it for a situation where fear or resistance is holding you back.'],
     name: 'The Flying Bird',
     intro: 'This layout is designed in the shape of a bird taking flight. The cards in the left wing say something about our feminine, receptive energy, while the right wing symbolizes our masculine, active energy. The first card is the initiator of the flight and stems from the active side. Each card responds to the one before and lifts "the bird" higher, moving the questioner into greater clarity and inner understanding.',
     variants: [{
@@ -119,6 +125,7 @@ const spreads = [
   },
   {
     id: 'key',
+    hint: ['What is repressed, your yin and yang, and insights into body, heart and being.', 'Use it for hidden, unconscious sides of an issue, or a general inner check-in.'],
     name: 'The Key',
     intro: '"The Key" layout can open the door to insights regarding hidden, unconscious aspects of a particular issue. It may also be used as a general reading for an insight into your interiority here and now.',
     variants: [{
@@ -136,6 +143,7 @@ const spreads = [
   },
   {
     id: 'celtic-cross',
+    hint: ['The classic ten-card spread: the issue, conscious and unconscious influences, old and new patterns, the outcome.', 'Use it for a big question you want to look at in depth.'],
     name: 'The Celtic Cross',
     intro: 'This traditional layout is used for clarity on a specific issue as well as for general readings. In the Osho Zen Tarot the positions have the meanings below.',
     variants: [{
@@ -155,6 +163,7 @@ const spreads = [
   },
   {
     id: 'mirror',
+    hint: ['Twelve cards: you and your partner in body, heart and mind, and the outer and inner purpose of your togetherness.', 'Use it for an in-depth look at a close relationship.'],
     name: 'The Mirror',
     intro: 'A more in-depth approach to your relating with the other, whether the boss, the lover, the friend, the sister, the parent. It offers an understanding of the life processes of each of you, as well as insight into what is happening between you.',
     variants: [{
@@ -176,6 +185,7 @@ const spreads = [
   },
   {
     id: 'paradox',
+    hint: ['A ritual of shuffling and cutting: here and now, past-life influences, and an insight into the paradox.', 'Use it for feeling stuck between two things that both seem true.'],
     name: 'The Paradox',
     intro: 'Shuffle the deck for as long as you like, then cut it into three packs and choose one. The top card of that pack is the here and now, its bottom card the past-life influences. Then fan the rest of the pack and pick one more card: the insight into the paradox.',
     // The cut is part of this spread: choosing a pack places cards 1 and 2 itself.
@@ -186,6 +196,7 @@ const spreads = [
   },
   {
     id: 'ankh',
+    hint: ['Two impulses, the reasons and excuses behind them, then the enlightenment, the next step and the result.', 'Use it for understanding the root cause of a recurring situation.'],
     name: 'The Ankh',
     intro: 'Based on the ancient Egyptian ankh, a symbol of life also known as the "mirror of Venus". Cards on the circle show the spiritual background and root cause of what is happening; cards on the cross show how it manifests in real life, what can be done, and what it will bring. Traditionally cards 7 to 9 are revealed only once the enlightenment (5) has been reached and the conclusions (6) drawn.',
     variants: [{
@@ -204,6 +215,7 @@ const spreads = [
   },
   {
     id: 'shadow-work',
+    hint: ['What a part of your shadow hides, how it shows up, and a next step toward bringing it to light.', 'Use it for a pattern in yourself you keep running into.'],
     name: 'Shadow Work',
     intro: 'For looking at a part of your shadow: what it hides, how it shows up, and how to bring it to light.',
     variants: [
@@ -230,6 +242,7 @@ const spreads = [
   },
   {
     id: 'horseshoe',
+    hint: ['Past, present and future, with your attitude, other influences and the obstacles on the way.', 'Use it for a strategy toward an outcome, not just a forecast.'],
     name: 'The Horseshoe',
     intro: 'Looks at a situation from several angles: past influences, current challenges and future opportunities. Useful when you want a strategy for reaching the outcome. It is not just a case of "this is the outcome, good luck": it also shows the obstacles and how to overcome them.',
     variants: [{
@@ -246,6 +259,7 @@ const spreads = [
   },
   {
     id: 'decision',
+    hint: ['Two cards per option: what the choice holds and where it leads.', 'Use it for choosing between two to four options; name them in your question.'],
     name: 'Decision Making',
     intro: 'For weighing options. Each option gets two cards: what the choice holds, and where it leads. Name your options in the question, in order, so the reading knows which is which.',
     variants: [2, 3, 4].map(n => ({ name: `${n} options`, positions: decisionPositions(n) })),

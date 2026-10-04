@@ -142,6 +142,34 @@ main {
 .tile-name { font-size: 19px; }
 .tile-count { color: var(--muted); font-size: 15px; }
 
+/* What the spread is and what it is for, over the tile on hover. Only where there is a
+   real hover: on a touch screen it would turn the first tap into a hover instead of
+   opening the spread. */
+.spread-tile { position: relative; overflow: hidden; }
+.mini-board { isolation: isolate; }  /* keeps the slots' z-index from rising over the hint */
+.tile-hint { display: none; }
+
+@media (hover: hover) and (pointer: fine) {
+  .tile-hint {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px;
+    background: var(--surface-2);
+    font-size: 15px;
+    line-height: 1.35;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+
+  .tile-use { color: var(--gold); }
+  .spread-tile:hover .tile-hint, .spread-tile:focus-visible .tile-hint { opacity: 1; }
+}
+
 /* ---------- reading ---------- */
 
 .reading-head { margin-bottom: 16px; }
