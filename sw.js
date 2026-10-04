@@ -27,7 +27,9 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      // Caches are shared by everything on this origin (the tailnet host also serves other
+      // apps), so only this site's own older caches are removed.
+      .then(keys => Promise.all(keys.filter(k => k.startsWith('tarot-') && k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

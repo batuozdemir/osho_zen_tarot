@@ -16,6 +16,30 @@ let readingId = null;   // journal id once the reading is saved
 let interpretation = null;
 let ownReading = false;  // saved in this sitting, so undo may still change it
 let pollTimer = null;
+let saving = false;
+let saveFailed = false;
+
+// Bumped whenever the reading on screen is replaced or changed. Anything asynchronous (a
+// card in flight, a save, a poll, a debounced question update) captures it first and
+// does nothing if it has moved on, so a slow response never lands on another reading.
+let gen = 0;
+const isCurrent = g => g === gen;
+
+function beginTransition() {
+  // A question edit still waiting for its debounce belongs to the reading being left;
+  // send it now, while that reading is still the one on screen.
+  if (questionTimer) {
+    clearTimeout(questionTimer);
+    questionTimer = null;
+    if (readingId && spread) sendQuestion();
+  }
+  gen++;
+  flying = false;
+  saving = false;
+  saveFailed = false;
+  document.querySelectorAll('.flyer').forEach(f => f.remove());
+  stopPolling();
+}
 
 // The journal exists only where the server answers (the tailnet copy, not GitHub Pages).
 const server = { on: false };
@@ -300,6 +324,7 @@ function setupSpread(s, variant) {
 function openSpread(id) {
   const s = spreads.find(sp => sp.id === id);
   if (!s) return showHome();
+  beginTransition();  // before anything about the old reading is replaced
   setupSpread(s, 0);
   $('question').value = '';
   newReading();
@@ -309,12 +334,15 @@ function openSpread(id) {
 // Opens a finished reading from a link: #r?s=<spread>&v=<variant>&c=<cards>&q=<question>&id=<journal id>
 function openSharedReading(params) {
   const s = spreads.find(sp => sp.id === params.get('s'));
-  const cards = (params.get('c') || '').split('-').map(Number);
   if (!s) return showHome();
-  setupSpread(s, Number(params.get('v')) || 0);
-  const ps = positions();
-  const valid = cards.length === ps.length && cards.every(n => n >= 1 && n <= TOTAL_CARDS) && new Set(cards).size === cards.length;
+  const v = Number(params.get('v') ?? 0);
+  const cards = (params.get('c') || '').split('-').map(Number);
+  if (!Number.isInteger(v) || v < 0 || v >= s.variants.length) return openSpread(s.id);
+  const valid = cards.length === s.variants[v].positions.length &&
+    cards.every(n => Number.isInteger(n) && n >= 1 && n <= TOTAL_CARDS) && new Set(cards).size === cards.length;
   if (!valid) return openSpread(s.id);
+  beginTransition();
+  setupSpread(s, v);
   placed = cards;
   deck = shuffle(Array.from({ length: TOTAL_CARDS }, (_, i) => i + 1).filter(n => !cards.includes(n)));
   cutDone = true;
@@ -330,11 +358,13 @@ function openSharedReading(params) {
 }
 
 function showHome() {
+  beginTransition();
   spread = null;
   showView('picker');
 }
 
 function newReading() {
+  beginTransition();
   deck = shuffle(Array.from({ length: TOTAL_CARDS }, (_, i) => i + 1));
   placed = [];
   fanMode = 'fan';
@@ -389,7 +419,11 @@ function isDone() {
 function statusText() {
   const ps = positions();
   if (isDone()) {
-    return server.on ? 'The spread is complete and saved to your journal.' : 'The spread is complete.';
+    if (!server.on) return 'The spread is complete.';
+    if (readingId) return 'The spread is complete and saved to your journal.';
+    if (saveFailed) return 'The spread is complete, but it could not be saved to the journal.';
+    if (saving) return 'The spread is complete. Saving it to your journal…';
+    return 'The spread is complete.';
   }
   if (fanMode === 'piles') return 'Choose one of the three packs.';
   if (isParadox() && !cutDone) return 'Shuffle for as long as you like, then cut the deck and choose a pack.';
@@ -405,6 +439,7 @@ function update() {
 
   $('status').textContent = statusText();
   $('fan').classList.toggle('closed', done);
+  $('fan').inert = done;
   $('deckControls').hidden = done || placed.length > 0 || fanMode === 'piles' || (isParadox() && cutDone);
 
   const list = $('positions');
@@ -513,7 +548,9 @@ function shuffleDeck() {
     c.style.transform = `translate(${W / 2 - cw / 2 + (Math.random() - 0.5) * 30}px, 20px) rotate(${(Math.random() - 0.5) * 16}deg)`;
   });
   // The cards stay gathered for the length of the riffle, then fan out again.
+  const g = gen;
   setTimeout(() => {
+    if (!isCurrent(g)) return;
     deck = shuffle(deck);
     cards.forEach((c, i) => { c.dataset.card = deck[i]; });
     layoutFan();
@@ -541,11 +578,14 @@ async function choosePile(pile) {
   play('cut');
 
   if (isParadox()) {
+    const g = gen;
     flying = true;
     const [top, bottom] = [inPile[inPile.length - 1], inPile[0]];
     cards.filter(c => !inPile.includes(c)).forEach(c => c.classList.add('leaving'));
     await place(top);
+    if (!isCurrent(g)) return;
     await place(bottom);
+    if (!isCurrent(g)) return;
     cards.filter(c => !inPile.includes(c)).forEach(c => c.remove());
     deck = [...$('fan').children].map(c => Number(c.dataset.card));
     fanMode = 'fan';
@@ -565,8 +605,10 @@ async function choosePile(pile) {
 
 function pick(cardEl) {
   if (flying || isDone()) return;
+  const g = gen;
   flying = true;
   place(cardEl).then(() => {
+    if (!isCurrent(g)) return;
     flying = false;
     update();
     if (isDone()) saveReading();
@@ -575,6 +617,7 @@ function pick(cardEl) {
 
 // Flies a card from the fan to the next empty position and flips it there.
 function place(cardEl) {
+  const g = gen;
   const n = Number(cardEl.dataset.card);
   const index = placed.length;
   const slot = slotAt(index);
@@ -617,9 +660,11 @@ function place(cardEl) {
     const land = () => {
       if (landed) return;
       landed = true;
-      play('place');
-      fillSlot(slot, n, true);
       flyer.remove();
+      if (isCurrent(g)) {
+        play('place');
+        fillSlot(slot, n, true);
+      }
       resolve();
     };
     flyer.addEventListener('transitionend', land, { once: true });
@@ -630,6 +675,11 @@ function place(cardEl) {
 function undo() {
   if (flying || placed.length === 0 || interpretation || (readingId && !ownReading)) return;
   if (readingId) discardSaved();
+  gen++;
+  saving = false;
+  saveFailed = false;
+  clearTimeout(questionTimer);
+  questionTimer = null;
   const n = placed.pop();
   deck.splice(randomInt(deck.length + 1), 0, n);
   history.replaceState(null, '', `#${spread.id}`);
@@ -641,7 +691,7 @@ function undo() {
 function changeVariant() {
   const before = positions().length;
   variantIndex = Number($('variantSelect').value);
-  if (positions().length !== before || readingId) {
+  if (positions().length !== before || readingId || saving) {
     newReading();
   } else {
     renderBoard();
@@ -697,19 +747,35 @@ async function detectServer() {
 }
 
 async function saveReading() {
-  if (!server.on || readingId) return;
+  if (!server.on || readingId || saving || !isDone()) return;
+  const g = gen;
+  const question = $('question').value.trim();
+  saving = true;
+  saveFailed = false;
+  update();
+  let r;
   try {
-    const r = await api('readings', {
+    r = await api('readings', {
       method: 'POST',
-      body: JSON.stringify({ spread: spread.id, variant: variantIndex, question: $('question').value.trim(), cards: placed, summary: readingText() }),
+      body: JSON.stringify({ spread: spread.id, variant: variantIndex, question, cards: placed, summary: readingText() }),
     });
-    readingId = r.id;
-    ownReading = true;
-    update();
-    startPolling();
   } catch {
-    toast('Could not save to the journal.');
+    if (!isCurrent(g)) return;
+    saving = false;
+    saveFailed = true;
+    update();
+    toast('Could not save to the journal.', { label: 'Retry', run: saveReading });
+    return;
   }
+  // The reading changed while this was saving (undo, new reading, navigation): the row
+  // describes a reading that no longer exists, so remove it again.
+  if (!isCurrent(g)) return api(`readings/${r.id}`, { method: 'DELETE' }).catch(() => {});
+  saving = false;
+  readingId = r.id;
+  ownReading = true;
+  if ($('question').value.trim() !== question) sendQuestion();
+  update();
+  startPolling();
 }
 
 function discardSaved() {
@@ -722,46 +788,66 @@ function discardSaved() {
 let questionTimer = null;
 function onQuestionInput() {
   if (isDone()) history.replaceState(null, '', `#${shareHash()}`);
-  if (!readingId) return;
+  if (!readingId) return;  // a save in progress picks the new question up when it lands
   clearTimeout(questionTimer);
+  const g = gen, id = readingId;
   questionTimer = setTimeout(() => {
-    api(`readings/${readingId}/question`, {
-      method: 'PUT',
-      body: JSON.stringify({ question: $('question').value.trim(), summary: readingText() }),
-    }).catch(() => {});
+    questionTimer = null;
+    if (isCurrent(g) && readingId === id) sendQuestion();
   }, 700);
 }
 
-async function loadReading(id) {
+function sendQuestion() {
+  let body;
   try {
-    const r = await api(`readings/${id}`);
-    if (readingId !== id) return;
-    $('question').value = r.question;
-    interpretation = r.interpretation ? { text: r.interpretation, at: r.interpreted_at } : null;
-    update();
-    if (!interpretation) startPolling();
+    body = JSON.stringify({ question: $('question').value.trim(), summary: readingText() });
   } catch {
-    readingId = null;
-    update();
+    return;  // only reachable if the reading is incomplete; nothing sensible to send
   }
+  api(`readings/${readingId}/question`, { method: 'PUT', body }).catch(() => {});
 }
 
-// While a saved reading waits for Claude, check for the interpretation every few seconds.
+async function loadReading(id) {
+  const g = gen;
+  let r;
+  try {
+    r = await api(`readings/${id}`);
+  } catch {
+    if (!isCurrent(g) || readingId !== id) return;
+    readingId = null;
+    update();
+    return;
+  }
+  if (!isCurrent(g) || readingId !== id) return;
+  // A link whose cards were edited by hand must not pass for the saved reading.
+  if (r.spread !== spread.id || r.variant !== variantIndex || r.cards.join('-') !== placed.join('-')) {
+    const link = readingLink(r);
+    history.replaceState(null, '', link);
+    return openSharedReading(new URLSearchParams(link.slice(3)));
+  }
+  $('question').value = r.question;
+  interpretation = r.interpretation ? { text: r.interpretation, at: r.interpreted_at } : null;
+  update();
+  startPolling();
+}
+
+// While a saved reading is on screen, check every few seconds for an interpretation, or
+// for a revised one after a follow-up.
 function startPolling() {
   stopPolling();
+  const g = gen, id = readingId;
   pollTimer = setInterval(async () => {
-    if (!readingId || interpretation) return stopPolling();
+    if (!isCurrent(g) || readingId !== id) return stopPolling();
     if (document.visibilityState !== 'visible') return;
-    try {
-      const r = await api(`readings/${readingId}`);
-      if (r.interpretation) {
-        interpretation = { text: r.interpretation, at: r.interpreted_at };
-        stopPolling();
-        update();
-        toast("Claude's interpretation has arrived.");
-        $('interpretation').scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth' });
-      }
-    } catch {}
+    let r;
+    try { r = await api(`readings/${id}`); } catch { return; }
+    if (!isCurrent(g) || readingId !== id || !r.interpretation) return;
+    if (interpretation && interpretation.at === r.interpreted_at) return;
+    const first = !interpretation;
+    interpretation = { text: r.interpretation, at: r.interpreted_at };
+    update();
+    toast(first ? "Claude's interpretation has arrived." : 'The interpretation was updated.');
+    if (first) $('interpretation').scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth' });
   }, 5000);
 }
 
@@ -784,19 +870,23 @@ function renderInterpretation() {
   $('interpretationText').innerHTML = renderMarkdown(interpretation.text);
 }
 
-async function showJournal() {
+// `refresh` keeps the scroll position, for reloading the list in place after a delete.
+async function showJournal(refresh = false) {
   if (!server.on) return showHome();
+  beginTransition();
+  const g = gen;
   spread = null;
   showView('journal');
-  window.scrollTo(0, 0);
+  if (!refresh) window.scrollTo(0, 0);
   $('journalSummary').textContent = 'Loading…';
   let readings;
   try {
-    readings = await api('readings');
+    readings = await api('readings?limit=5000');
   } catch {
-    $('journalSummary').textContent = 'The journal could not be loaded.';
+    if (isCurrent(g)) $('journalSummary').textContent = 'The journal could not be loaded.';
     return;
   }
+  if (!isCurrent(g)) return;
   renderPatterns(readings);
   renderJournalList(readings);
 }
@@ -846,12 +936,13 @@ async function deleteFromJournal(id) {
   } catch {
     return toast('Could not delete the reading.');
   }
-  showJournal();
+  const refresh = () => { if (location.hash === '#journal') showJournal(true); };
+  refresh();
   toast('Reading deleted.', {
     label: 'Undo',
     run: async () => {
-      await api(`readings/${id}/restore`, { method: 'POST' }).catch(() => {});
-      showJournal();
+      await api(`readings/${id}/restore`, { method: 'POST' }).catch(() => toast('Could not restore the reading.'));
+      refresh();
     },
   });
 }
@@ -932,6 +1023,7 @@ const DECK_NOTE = [
   'About the deck: the Osho Zen Tarot is about understanding the here and now, not predicting the future.',
   'The Major Arcana (0 to XXI, plus The Master) are the central themes of the spiritual journey; when one appears it carries special weight, and a reading without any suggests a passing chapter rather than a turning point.',
   'The four suits: Fire is action and response, following the gut; Water is the emotions, receptive; Clouds is the mind, which hides the light but comes and goes; Rainbows is the practical, material side of life, earth and spirit as one.',
+  "Treat the cards and Osho's words as a mirror for reflection, not as facts, predictions, or medical or psychological diagnoses, and read positions about the future or past lives in that same reflective way.",
 ].join(' ');
 
 function readingText() {
@@ -1001,7 +1093,9 @@ function toast(message, action) {
 // ---------- dialogs ----------
 
 function openCard(n, positionIndex) {
-  $('detailImage').src = cardImage(n);
+  const img = $('detailImage');
+  img.onerror = () => { img.onerror = null; img.src = cardThumb(n); };  // offline: the thumbnail is cached
+  img.src = cardImage(n);
   $('detailImage').alt = cardName(n);
   $('detailName').textContent = cardName(n);
   $('detailSuit').textContent = cardRank(n);
@@ -1070,7 +1164,8 @@ function track(name) {
 // ---------- wiring ----------
 
 function route() {
-  const h = decodeURIComponent(location.hash.slice(1));
+  let h;
+  try { h = decodeURIComponent(location.hash.slice(1)); } catch { return showHome(); }
   if (!h) return showHome();
   if (h === 'journal') return showJournal();
   if (h.startsWith('r?')) return openSharedReading(new URLSearchParams(location.hash.slice(3)));

@@ -11,13 +11,17 @@ set -eu
 HOST="${TAROT_DEPLOY_HOST:-ubuntu@vps-oci-1}"
 cd "$(dirname "$0")/.."
 
+# The archive is built locally first: in a pipeline, plain sh would not notice tar failing
+# halfway (a missing file) and would deploy whatever part of the site got through.
+ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/tarot-deploy.XXXXXX")"
+trap 'rm -f "$ARCHIVE"' EXIT
 # --no-xattrs: macOS tags files with provenance attributes GNU tar on the host warns about.
-COPYFILE_DISABLE=1 tar --no-xattrs -czf - \
+COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" \
   index.html styles.css script.js sw.js manifest.webmanifest js \
   assets/CardPictures assets/CardText assets/CardCommentary assets/UserGuide \
   assets/icons assets/sounds assets/EBGaramond.ttf assets/favicon.ico \
-  server/app.py server/tarot.service |
-  ssh "$HOST" 'cat > /tmp/tarot-deploy.tgz'
+  server/app.py server/tarot.service
+ssh "$HOST" 'cat > /tmp/tarot-deploy.tgz' < "$ARCHIVE"
 
 ssh "$HOST" 'set -eu
   id tarot >/dev/null 2>&1 || sudo useradd --system --no-create-home --shell /usr/sbin/nologin tarot

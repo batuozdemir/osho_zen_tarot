@@ -35,7 +35,7 @@ each card is in the `ranks` table in `script.js`.
 ```sh
 cd server
 uv venv && uv pip install fastapi uvicorn
-TAROT_DB=/tmp/journal-dev.db .venv/bin/uvicorn app:app --port 8765
+TAROT_DB=/tmp/journal-dev.db .venv/bin/uvicorn app:app --port 8765   # default: ~/.local/share/tarot/
 ```
 
 Then open http://127.0.0.1:8765. Without the server, any static file server works too;
@@ -62,8 +62,8 @@ tailnet ACL decides who gets in.
 | GET | `api/readings/{id}` | | One reading |
 | POST | `api/readings` | `{"spread", "variant", "question", "cards": [n, ...], "summary"}` | Saves a finished reading |
 | PUT | `api/readings/{id}/question` | `{"question", "summary"}` | Updates the question (and the summary that quotes it) |
-| PUT | `api/readings/{id}/interpretation` | `{"text"}` (Markdown) | Saves Claude's interpretation; the open page picks it up within seconds |
-| DELETE | `api/readings/{id}` | | Deletes a reading; it can be restored for 30 days, then it is purged |
+| PUT | `api/readings/{id}/interpretation` | `{"text"}` (Markdown) | Saves Claude's interpretation; an open page picks it up, or a revision of it, within seconds |
+| DELETE | `api/readings/{id}` | | Deletes a reading; it can be restored for 30 days, then it is purged (checked on every list, delete and restore) |
 | POST | `api/readings/{id}/restore` | | Brings a deleted reading back (the page's Undo) |
 
 `cards` are card numbers in position order. `summary` is the whole reading as plain text:
@@ -85,8 +85,10 @@ or asks Claude to do a reading:
    need more context about his situation to be read well, ask first: a few short
    questions at a time, then wait for the answers before interpreting.
 4. Read each card in its position, then bring them together into one answer to the
-   question, in the language of the question. Afterwards, offer to go deeper into any
-   card or part of the answer.
+   question, in the language of the question. Treat the cards and Osho's words as a
+   mirror for reflection, not as facts, predictions or medical and psychological
+   diagnoses; positions about the future or past lives are read the same way. Afterwards,
+   offer to go deeper into any card or part of the answer.
 5. `PUT api/readings/{id}/interpretation` with `{"text": "<Markdown>"}` once the
    interpretation is settled (again if a follow-up changes it). The open page shows it
    within seconds. Give the interpretation in the chat too.

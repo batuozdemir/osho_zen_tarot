@@ -17,7 +17,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 SITE_DIR = Path(os.environ.get("TAROT_SITE_DIR", Path(__file__).resolve().parent.parent))
-DB_PATH = Path(os.environ.get("TAROT_DB", Path(__file__).resolve().parent / "journal.db"))
+# The default lives outside the repo: the repo root is the served site when run locally,
+# and a database inside it would be downloadable as a static file.
+DB_PATH = Path(os.environ.get("TAROT_DB", Path.home() / ".local/share/tarot/journal.db"))
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -49,9 +52,19 @@ with db() as conn:
         conn.execute("ALTER TABLE readings ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
     if "deleted_at" not in columns:
         conn.execute("ALTER TABLE readings ADD COLUMN deleted_at TEXT")
-    # A deleted reading can be restored for 30 days, then it is gone.
-    # Timestamps are ISO 8601 in UTC, so the cutoff is written the same way to compare as text.
+
+
+def purge(conn: sqlite3.Connection) -> None:
+    """A deleted reading can be restored for 30 days, then it is gone.
+
+    Run on every list, delete and restore rather than once at start, so a long-running
+    service still forgets on time. Timestamps are ISO 8601 in UTC, so the cutoff is
+    written the same way to compare as text."""
     conn.execute("DELETE FROM readings WHERE deleted_at < strftime('%Y-%m-%dT%H:%M:%S', 'now', '-30 days')")
+
+
+with db() as conn:
+    purge(conn)
 
 
 def now() -> str:
@@ -102,6 +115,7 @@ def health() -> dict:
 @app.get("/api/readings")
 def list_readings(limit: int = 500) -> list[dict]:
     with db() as conn:
+        purge(conn)
         rows = conn.execute(
             "SELECT * FROM readings WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?", (min(limit, 5000),)
         ).fetchall()
@@ -153,6 +167,7 @@ def set_interpretation(reading_id: str, body: Interpretation) -> dict:
 @app.delete("/api/readings/{reading_id}", status_code=204)
 def delete_reading(reading_id: str) -> None:
     with db() as conn:
+        purge(conn)
         get_row(conn, reading_id)
         conn.execute("UPDATE readings SET deleted_at = ? WHERE id = ?", (now(), reading_id))
 
@@ -160,6 +175,7 @@ def delete_reading(reading_id: str) -> None:
 @app.post("/api/readings/{reading_id}/restore")
 def restore_reading(reading_id: str) -> dict:
     with db() as conn:
+        purge(conn)
         get_row(conn, reading_id, deleted=True)
         conn.execute("UPDATE readings SET deleted_at = NULL WHERE id = ?", (reading_id,))
         return get_row(conn, reading_id)
