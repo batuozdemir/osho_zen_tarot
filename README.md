@@ -1,6 +1,15 @@
 # Osho Zen Tarot
 
-A small site for drawing Osho Zen Tarot spreads. Pick one of 13 spreads, shuffle and cut
+A small site for drawing tarot spreads with two decks: the Osho Zen Tarot and the classic
+Rider-Waite-Smith deck (1909). A switch in the top bar changes the whole site to the other
+deck (card of the day, browsing, spreads and journal); the choice is remembered on the
+device. With the Osho Zen deck there are 13 spreads; with Rider-Waite the five that are not
+specific to the Osho guidebook (single card, three cards, Celtic Cross in Waite's own form,
+horseshoe, decision). Rider-Waite readings can use reversed cards: a "Reversed cards"
+button next to Shuffle turns them on before the first card, and each card then comes up
+upright or reversed at random.
+
+Pick a spread, shuffle and cut
 the deck, pick cards from a face-down fan, and each card flies into its position. Once
 the spread is complete, an optional field asks for a first impression before the card
 texts are read. A finished reading is saved to the journal (tailnet copy), where Claude
@@ -27,17 +36,22 @@ It runs in two places from the same code:
 |---|---|
 | `index.html`, `styles.css`, `script.js` | The whole front end, no build step |
 | `js/cardData.js` | Card names, Osho texts and commentaries, keyed by card number 1–79 |
-| `js/spreads.js` | The spreads: positions, their meanings, and coordinates in card units |
-| `assets/CardPictures/` | Full-size card images; `small/` holds the 420px WebP copies used everywhere but the detail view |
+| `js/rwsData.js` | Rider-Waite card names with upright and reversed meanings, card numbers 1–78 (written for this site) |
+| `js/spreads.js` | The spreads: positions, their meanings, coordinates in card units, and which deck offers them |
+| `assets/CardPictures/` | Full-size card images (Adobe RGB, with their profile); `small/` holds the 420px WebP copies used everywhere but the detail view, converted to sRGB (`cwebp -q 78 -m 6 -sharp_yuv`) |
+| `assets/rws/` | Rider-Waite card images, the same way (1909 scans from Wikimedia Commons, public domain, padded to 2:3) |
 | `assets/CardText/`, `assets/CardCommentary/` | The same texts as plain files, for Claude to read |
 | `assets/UserGuide/guide.md` | The deck's guidebook: suits, symbols, how to ask |
 | `assets/sounds/` | Sound effects, trimmed and levelled from CC0 recordings (credits below) |
 | `sw.js`, `manifest.webmanifest`, `assets/icons/` | Offline use and installing on a phone's home screen |
 | `server/` | The journal server, its systemd unit, and the deploy script |
 
-Cards 1–23 are the Major Arcana (with The Master), then Clouds 24–37, Fire 38–51,
-Rainbows 52–65 and Water 66–79. The numbers are file order, not deck order; the rank of
-each card is in the `ranks` table in `script.js`.
+Osho Zen: cards 1–23 are the Major Arcana (with The Master), then Clouds 24–37, Fire
+38–51, Rainbows 52–65 and Water 66–79. The numbers are file order, not deck order; the
+rank of each card is in the `ranks` table in `script.js`. Rider-Waite: 1–22 are the Major
+Arcana (The Fool to The World), then Wands 23–36, Cups 37–50, Swords 51–64 and Pentacles
+65–78, each Ace to King. Everything that differs between the decks is in `DECKS` in
+`script.js`.
 
 ## Running it locally
 
@@ -69,7 +83,7 @@ tailnet ACL decides who gets in.
 | GET | `api/health` | | `{"ok": true}` |
 | GET | `api/readings` | | All readings, newest first (`?limit=n` for only the latest) |
 | GET | `api/readings/{id}` | | One reading |
-| POST | `api/readings` | `{"spread", "variant", "question", "impression", "cards": [n, ...], "summary", "created_at"?}` | Saves a finished reading; `created_at` is when it was drawn, for one saved late |
+| POST | `api/readings` | `{"deck"?, "spread", "variant", "question", "impression", "cards": [n, ...], "reversed"?, "summary", "created_at"?}` | Saves a finished reading; `deck` is `osho` (default) or `rws`, `reversed` one flag per card when reversals were in play, `created_at` when it was drawn, for one saved late |
 | PATCH | `api/readings/{id}` | `{"question"?, "impression"?, "summary"?}` | Updates what Batu wrote (and the summary that quotes it); `PUT api/readings/{id}/question` is the old name |
 | GET | `api/readings/{id}/interpretation` | | The interpretation, its time and the earlier versions; what an open page polls |
 | PUT | `api/readings/{id}/interpretation` | `{"text"}` (Markdown) | Saves Claude's interpretation; a different text moves the previous one to `earlier`. An open page picks it up within seconds |
@@ -78,9 +92,12 @@ tailnet ACL decides who gets in.
 | DELETE | `api/readings/{id}` | | Deletes a reading; it can be restored for 30 days, then it is purged (checked on every list, delete and restore) |
 | POST | `api/readings/{id}/restore` | | Brings a deleted reading back (the page's Undo) |
 
-`cards` are card numbers in position order. `summary` is the whole reading as plain text:
-question, first impression, spread, a note on the deck, and every position with its
-card's full Osho text and commentary. It is the same text the "Copy reading" button
+`cards` are card numbers in position order, in the reading's `deck` (`osho` or `rws`; each
+deck has its own journal on the page, the API lists both). `reversed` is a list of
+booleans per card, or null when reversals were off. `summary` is the whole reading as
+plain text: question, first impression, spread, a note on the deck, and every position
+with its card's full text (Osho's text and commentary, or the Rider-Waite meaning, with
+the reversed meaning first for a reversed card). It is the same text the "Copy reading" button
 gives, written so that a chat assistant with no other context can interpret it. A
 reading also carries `impression` (Batu's own words, written before the card texts),
 `notes` (oldest first: `created_at`, `prompt`, `text`) and `earlier` (replaced
@@ -93,9 +110,12 @@ or asks Claude to do a reading:
 
 1. `GET api/readings` on the journal and pick the one he means; newest is first.
 2. Its `summary` holds everything: the question, the spread, and every position with its
-   card's full text and commentary. The guidebook (`assets/UserGuide/guide.md`) adds
-   the symbols, and earlier readings in the journal can be drawn on when a card or theme
-   recurs. If there is an `impression`, start from it: it is what Batu saw in the cards
+   card's full text. Check its `deck`. For an Osho Zen reading the guidebook
+   (`assets/UserGuide/guide.md`) adds the symbols. A Rider-Waite reading is read in that
+   deck's own tradition, and a reversed card (marked in the summary) as the card's energy
+   blocked, turned inward or delayed rather than simply negative. Earlier readings in the
+   journal can be drawn on when a card or theme recurs (within the same deck: card
+   numbers mean different cards in the two decks). If there is an `impression`, start from it: it is what Batu saw in the cards
    before any explanation. His `notes` say what stayed, what changed and what did not
    fit when he came back to a reading; read them before a follow-up.
 3. **Make it a conversation, not a verdict.** If the question is unclear, or the cards
@@ -118,6 +138,9 @@ or asks Claude to do a reading:
 The "Copy reading" text asks an outside assistant to work the same way.
 
 ## Credits
+
+Rider-Waite-Smith card images: Pamela Colman Smith, 1909 ("Roses and Lilies" edition), public
+domain, scans from Wikimedia Commons (https://commons.wikimedia.org/wiki/Category:Rider-Waite_tarot_deck_(Roses_%26_Lilies)).
 
 Sound effects, all CC0 (public domain), trimmed and levelled for the site:
 

@@ -3,6 +3,8 @@
 // Coordinates are card centers in card units: a card is 1 wide and 1.5 tall.
 // Positions are listed in drawing order (position 1 first).
 // `hint` is what the spread is and what to use it for, shown when hovering its tile.
+// `decks` lists the decks a spread is offered with; without it, the Osho Zen deck only
+// (most spreads here come from its guidebook).
 
 function P(label, x, y, rot = 0) {
   return { label, x, y, rot };
@@ -62,9 +64,12 @@ const threeCardVariants = [
   positions: row(labels),
 })));
 
+const BOTH = ['osho', 'rws'];
+
 const spreads = [
   {
     id: 'single',
+    decks: BOTH,
     hint: ['One card, one insight.', 'Use it for a quick look at today, or something to sit with in meditation.'],
     name: 'A Single Card',
     intro: 'For insights into any situation that relates to your living today. Or as a basis for meditating now.',
@@ -72,6 +77,7 @@ const spreads = [
   },
   {
     id: 'three-card',
+    decks: BOTH,
     hint: ['Three cards in a row, in many variations: past to future, problem to method, strengths to advice.', 'Use it for a clear question you want to see from three sides.'],
     name: 'Three Card Spread',
     intro: 'There are many variations of the three card spread. Choose the one that fits your question. Linear spreads follow a line from one card to the next; balanced spreads look at three sides of one thing; foundational spreads read as one sentence ("given your strengths and your weaknesses, this is my advice"); crossed spreads set a situation against what stands in its way.',
@@ -161,6 +167,29 @@ const spreads = [
       ],
     }],
   },
+  // The same spread as Waite gives it for the Rider-Waite deck: the second card lies across
+  // the first, and the staff of four rises beside the cross.
+  {
+    id: 'celtic-cross',
+    decks: ['rws'],
+    hint: ['The classic ten-card spread: the heart of the matter, what crosses it, past and near future, and where it is heading.', 'Use it for a big question you want to look at in depth.'],
+    name: 'The Celtic Cross',
+    intro: 'The traditional layout, in the form A.E. Waite gave it with this deck. The second card lies across the first; the cards around them show what crowns the matter, what lies beneath it, what is passing and what is coming. The four cards of the staff beside the cross show you, your surroundings, your hopes and fears, and where it all is heading.',
+    variants: [{
+      positions: [
+        P('The present: what covers you, the heart of the matter', 0, 0),
+        P('What crosses you: the challenge, for good or ill', 0, 0, 90),
+        P('What crowns you: your conscious aim, the best that can come of it', 0, -1.65),
+        P('What is beneath you: the foundation of the matter', 0, 1.65),
+        P('What is behind you: the recent past, passing away', -1.4, 0),
+        P('What is before you: the near future, coming into being', 1.4, 0),
+        P('Yourself: your attitude and part in the matter', 2.75, 2.4),
+        P('Your surroundings: the people and influences around you', 2.75, 0.8),
+        P('Your hopes and fears', 2.75, -0.8),
+        P('The outcome: where this is heading', 2.75, -2.4),
+      ],
+    }],
+  },
   {
     id: 'mirror',
     hint: ['Twelve cards: you and your partner in body, heart and mind, and the outer and inner purpose of your togetherness.', 'Use it for an in-depth look at a close relationship.'],
@@ -242,6 +271,7 @@ const spreads = [
   },
   {
     id: 'horseshoe',
+    decks: BOTH,
     hint: ['Past, present and future, with your attitude, other influences and the obstacles on the way.', 'Use it for a strategy toward an outcome, not just a forecast.'],
     name: 'The Horseshoe',
     intro: 'Looks at a situation from several angles: past influences, current challenges and future opportunities. Useful when you want a strategy for reaching the outcome. It is not just a case of "this is the outcome, good luck": it also shows the obstacles and how to overcome them.',
@@ -259,6 +289,7 @@ const spreads = [
   },
   {
     id: 'decision',
+    decks: BOTH,
     hint: ['Two cards per option: what the choice holds and where it leads.', 'Use it for choosing between two to four options; name them in your question.'],
     name: 'Decision Making',
     intro: 'For weighing options. Each option gets two cards: what the choice holds, and where it leads. Name your options in the question, in order, so the reading knows which is which.',

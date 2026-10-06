@@ -21,7 +21,13 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#">Osho Zen Tarot</a>
+    <div class="brand-row">
+      <a class="brand" id="brand" href="#">Osho Zen Tarot</a>
+      <div class="deck-switch" id="deckSwitch" role="group" aria-label="Deck">
+        <button data-deck="osho" aria-pressed="true">Osho Zen</button>
+        <button data-deck="rws" aria-pressed="false">Rider-Waite</button>
+      </div>
+    </div>
     <nav>
       <a class="ghost nav-link" id="journalLink" href="#journal" hidden>Journal</a>
       <button class="ghost" id="browseButton" data-goatcounter-click="Browse Cards">Browse cards</button>
@@ -89,6 +95,7 @@
           <div class="deck-controls" id="deckControls">
             <button class="ghost" id="shuffleButton">Shuffle</button>
             <button class="ghost" id="cutButton">Cut the deck</button>
+            <button class="ghost reversals-button" id="reversalsButton" aria-pressed="false" hidden>Reversed cards: off</button>
           </div>
           <div class="fan" id="fan" aria-label="The deck, face down"></div>
         </div>
@@ -132,7 +139,7 @@
     </section>
 
     <section id="journalView" hidden>
-      <h1>Journal</h1>
+      <h1 id="journalTitle">Journal</h1>
       <p class="lede" id="journalSummary"></p>
       <div class="pattern-block" id="recurringBlock" hidden></div>
       <div class="journal-head">
@@ -158,7 +165,7 @@
         <h2 id="detailName"></h2>
         <p class="suit" id="detailSuit"></p>
         <div id="detailText"></div>
-        <h3>Commentary</h3>
+        <h3 id="detailHeading">Commentary</h3>
         <div id="detailCommentary"></div>
       </div>
     </div>
@@ -219,6 +226,7 @@
   <div class="toast" id="toast" role="status"><span id="toastText"></span><button class="toast-action" id="toastAction" hidden></button></div>
 
   <script src="js/cardData.js"></script>
+  <script src="js/rwsData.js"></script>
   <script src="js/spreads.js"></script>
   <script src="script.js"></script>
   <script data-goatcounter="https://osho-zen-tarot.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>

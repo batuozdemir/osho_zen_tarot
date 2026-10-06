@@ -1,6 +1,5 @@
 // script.js
 
-const TOTAL_CARDS = 79;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 const $ = id => document.getElementById(id);
@@ -9,6 +8,7 @@ let spread = null;
 let variantIndex = 0;
 let deck = [];          // face-down card numbers, in fan order
 let placed = [];        // card number per position, in drawing order
+let reversed = null;    // per position, whether the card came up reversed; null when reversals are off
 let flying = false;
 let fanMode = 'fan';    // 'fan' or 'piles' (while the deck is cut)
 let cutDone = false;
@@ -53,7 +53,13 @@ function ownWords() {
 }
 
 function beginTransition() {
+  // A card in the air is already drawn: keep the reading with it, since the flight's own
+  // update will not run once the reading is left.
+  if (spread && flying) keepLocal();
   flushQuestion();
+  // A save still in flight belongs to the reading being left, which now has its final
+  // words; the next reading must not overwrite them.
+  pendingSave = null;
   hideToastAction();
   gen++;
   flying = false;
@@ -68,22 +74,17 @@ function beginTransition() {
 // The journal exists only where the server answers (the tailnet copy, not GitHub Pages).
 const server = { on: false };
 
-// ---------- cards ----------
+// ---------- decks ----------
 
-function cardName(n) {
-  return cardNames[n - 1];
-}
-
-function suitOf(n) {
+// Osho Zen: 1–23 Major Arcana (with The Master), then Clouds, Fire, Rainbows and Water.
+// The numbers are file order, not deck order; `ranks` below lists the cards in deck order.
+function oshoSuit(n) {
   if (n <= 23) return 'Major Arcana';
   if (n <= 37) return 'Clouds';
   if (n <= 51) return 'Fire';
   if (n <= 65) return 'Rainbows';
   return 'Water';
 }
-
-const SUITS = ['Major Arcana', 'Clouds', 'Fire', 'Rainbows', 'Water'];
-const SUIT_SIZE = { 'Major Arcana': 23, Clouds: 14, Fire: 14, Rainbows: 14, Water: 14 };
 
 // Rank of each card within its suit, as printed on the cards. Listed in deck order.
 const ranks = {
@@ -106,22 +107,94 @@ const ranks = {
   'Harmony': '10', 'Understanding': 'Page', 'Trust': 'Knight', 'Receptivity': 'Queen', 'Healing': 'King',
 };
 
-// "Major Arcana IX", "Major Arcana, The Master", "Page of Clouds"
-function cardRank(n) {
-  const suit = suitOf(n);
-  const rank = ranks[cardName(n)];
-  if (suit === 'Major Arcana') return rank === 'The Master' ? 'Major Arcana, The Master' : `Major Arcana ${rank}`;
-  return `${rank} of ${suit}`;
-}
+const ROMAN = ['0', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV',
+  'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX', 'XXI'];
 
-// Full size for the detail view; small copies everywhere else.
-function cardImage(n) {
-  return `assets/CardPictures/card_${n}.jpg`;
-}
+// Everything that differs between the two decks. `texts` gives the card window's sections
+// and `about` the card's part of the copied reading; both know whether it came up reversed.
+const DECKS = {
+  osho: {
+    id: 'osho',
+    title: 'Osho Zen Tarot',
+    total: 79,
+    suits: ['Major Arcana', 'Clouds', 'Fire', 'Rainbows', 'Water'],
+    suitSize: { 'Major Arcana': 23, Clouds: 14, Fire: 14, Rainbows: 14, Water: 14 },
+    suitOf: oshoSuit,
+    name: n => cardNames[n - 1],
+    // "Major Arcana IX", "Major Arcana, The Master", "Page of Clouds"
+    rank(n) {
+      const suit = oshoSuit(n);
+      const rank = ranks[cardNames[n - 1]];
+      if (suit === 'Major Arcana') return rank === 'The Master' ? 'Major Arcana, The Master' : `Major Arcana ${rank}`;
+      return `${rank} of ${suit}`;
+    },
+    order: () => Object.keys(ranks).map(name => cardNames.indexOf(name) + 1),
+    // Full size for the detail view; small copies everywhere else.
+    image: n => `assets/CardPictures/card_${n}.jpg`,
+    thumb: n => `assets/CardPictures/small/card_${n}.webp`,
+    texts: n => [[null, cardData[n].text], ['Commentary', cardData[n].commentary]],
+    about: n => ['Osho on this card:', cardData[n].text, '', 'Commentary:', cardData[n].commentary],
+    note: [
+      'About the deck: the Osho Zen Tarot is about understanding the here and now, not predicting the future.',
+      'The Major Arcana (0 to XXI, plus The Master) are the central themes of the spiritual journey; when one appears it carries special weight, and a reading without any suggests a passing chapter rather than a turning point.',
+      'The four suits: Fire is action and response, following the gut; Water is the emotions, receptive; Clouds is the mind, which hides the light but comes and goes; Rainbows is the practical, material side of life, earth and spirit as one.',
+      "Treat the cards and Osho's words as a mirror for reflection, not as facts, predictions, or medical or psychological diagnoses, and read positions about the future or past lives in that same reflective way.",
+    ].join(' '),
+  },
+  // Rider-Waite-Smith (1909): 1–22 Major Arcana, then Wands, Cups, Swords and Pentacles,
+  // each Ace to King, so the numbers are deck order.
+  rws: {
+    id: 'rws',
+    title: 'Rider-Waite Tarot',
+    total: 78,
+    suits: ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'],
+    suitSize: { 'Major Arcana': 22, Wands: 14, Cups: 14, Swords: 14, Pentacles: 14 },
+    suitOf: n => (n <= 22 ? 'Major Arcana' : ['Wands', 'Cups', 'Swords', 'Pentacles'][Math.floor((n - 23) / 14)]),
+    name: n => rwsCards[n - 1].name,
+    rank: n => (n <= 22 ? `Major Arcana ${ROMAN[n - 1]}` : `Minor Arcana, ${DECKS.rws.suitOf(n)}`),
+    order: () => Array.from({ length: 78 }, (_, i) => i + 1),
+    image: n => `assets/rws/card_${n}.jpg`,
+    thumb: n => `assets/rws/small/card_${n}.webp`,
+    reversals: true,
+    texts: (n, rev) => rev
+      ? [[null, rwsCards[n - 1].reversed], ['Upright', rwsCards[n - 1].upright]]
+      : [[null, rwsCards[n - 1].upright], ['Reversed', rwsCards[n - 1].reversed]],
+    about: (n, rev) => rev
+      ? ['Drawn reversed. The reversed meaning:', rwsCards[n - 1].reversed, '', 'The upright meaning, for context:', rwsCards[n - 1].upright]
+      : ['Meaning:', rwsCards[n - 1].upright],
+    note: [
+      'About the deck: the Rider-Waite-Smith tarot (A.E. Waite and Pamela Colman Smith, 1909), the classic 78-card deck.',
+      'The Major Arcana (0 to XXI) are the great themes and turning points of a life; when one appears it carries special weight, and a reading without any suggests a passing chapter rather than a turning point.',
+      'The four suits: Wands are fire, drive, desire and creativity; Cups are water, feeling, relationship and intuition; Swords are air, thought, truth and conflict; Pentacles are earth, body, work, money and home.',
+      'Treat the cards as a mirror for reflection, not as facts, predictions, or medical or psychological diagnoses, and read positions about the future in that same reflective way.',
+    ].join(' '),
+  },
+};
 
-function cardThumb(n) {
-  return `assets/CardPictures/small/card_${n}.webp`;
-}
+// A journal reading names its deck in `deck`; one kept on this device in `deckId`, since
+// its `deck` is the face-down cards. Both are Osho Zen when they predate the second deck.
+const readingDeck = r => DECKS[r?.deck] || DECKS.osho;
+const entryDeck = e => DECKS[e?.deckId] || DECKS.osho;
+
+// The deck the site shows, remembered on this device.
+let D = DECKS.osho;
+try { D = DECKS[localStorage.getItem('tarot-deck')] || DECKS.osho; } catch {}
+
+// Whether Rider-Waite readings can draw reversed cards, remembered on this device.
+let reversals = false;
+try { reversals = localStorage.getItem('tarot-reversals') === 'on'; } catch {}
+
+// `dk` is a deck from DECKS (`deck` is the face-down cards of the reading on screen).
+const cardName = (n, dk = D) => dk.name(n);
+const cardRank = (n, dk = D) => dk.rank(n);
+const cardImage = (n, dk = D) => dk.image(n);
+const cardThumb = (n, dk = D) => dk.thumb(n);
+const isRev = i => !!reversed?.[i];
+const allCards = (dk = D) => Array.from({ length: dk.total }, (_, i) => i + 1);
+
+// The spreads a deck offers: a spread without `decks` belongs to the Osho Zen deck only.
+const spreadsOf = (dk = D) => spreads.filter(s => (s.decks || ['osho']).includes(dk.id));
+const findSpread = (id, dk = D) => spreadsOf(dk).find(s => s.id === id);
 
 function randomInt(max) {
   const buf = new Uint32Array(1);
@@ -273,12 +346,13 @@ function layout(el, positions) {
 
 // ---------- home: card of the day and the spread picker ----------
 
-// The same card all day, for everyone: an FNV-1a hash of the local date picks it.
+// The same card all day, for everyone: an FNV-1a hash of the local date picks it. The
+// Rider-Waite key has a prefix so the two decks do not land on the same number every day.
 function cardOfTheDay(date = new Date()) {
-  const key = `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+  const key = `${D.id === 'osho' ? '' : `${D.id}:`}${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
   let h = 2166136261;
   for (const ch of key) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
-  return ((h >>> 0) % TOTAL_CARDS) + 1;
+  return ((h >>> 0) % D.total) + 1;
 }
 
 function renderDaily() {
@@ -288,7 +362,7 @@ function renderDaily() {
   $('dailyDate').textContent = `Card of the day · ${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}`;
   $('dailyName').textContent = cardName(n);
   $('dailyRank').textContent = cardRank(n);
-  $('dailyExcerpt').textContent = cardData[n].text.split(/\r?\n\s*\r?\n/)[0].trim();
+  $('dailyExcerpt').textContent = D.texts(n)[0][1].split(/\r?\n\s*\r?\n/)[0].trim();
   const open = () => openCard(n, null);
   $('dailyCard').onclick = open;
   $('dailyMore').onclick = open;
@@ -296,7 +370,8 @@ function renderDaily() {
 
 function renderPicker() {
   const grid = $('spreadGrid');
-  spreads.forEach(s => {
+  grid.replaceChildren();
+  spreadsOf().forEach(s => {
     const tile = document.createElement('a');
     tile.className = 'spread-tile';
     tile.href = `#${s.id}`;
@@ -354,17 +429,24 @@ function dropLocal(key) {
 }
 
 function entryDone(e) {
-  const s = spreads.find(sp => sp.id === e.spread);
+  const s = findSpread(e.spread, entryDeck(e));
   return !!s && e.placed.length >= s.variants[e.variant].positions.length;
+}
+
+// Reversed flags, from storage or a link: none at all, or one boolean per card.
+function validReversed(rev, cards) {
+  return rev == null || (Array.isArray(rev) && rev.length === cards.length && rev.every(x => typeof x === 'boolean'));
 }
 
 // Entries are read back from storage, so they are checked like a link would be.
 function validEntry(e) {
-  const s = e && spreads.find(sp => sp.id === e.spread);
-  const ok = n => Number.isInteger(n) && n >= 1 && n <= TOTAL_CARDS;
+  const dk = entryDeck(e);
+  const s = e && findSpread(e.spread, dk);
+  const ok = n => Number.isInteger(n) && n >= 1 && n <= dk.total;
   return !!s && Number.isInteger(e.variant) && e.variant >= 0 && e.variant < s.variants.length &&
     Array.isArray(e.placed) && e.placed.every(ok) && e.placed.length <= s.variants[e.variant].positions.length &&
-    Array.isArray(e.deck) && e.deck.every(ok) && new Set([...e.placed, ...e.deck]).size === e.placed.length + e.deck.length;
+    Array.isArray(e.deck) && e.deck.every(ok) && new Set([...e.placed, ...e.deck]).size === e.placed.length + e.deck.length &&
+    validReversed(e.reversed, e.placed);
 }
 
 // Where the journal exists: the server has answered on this origin before, so a finished
@@ -377,9 +459,10 @@ function keepLocal() {
   let list = localReadings().filter(e => e.key !== localKey);
   const done = isDone();
   if (placed.length && !readingId && (!done || journalOrigin)) {
-    if (!done) list = list.filter(entryDone);
+    // The one unfinished reading kept is per deck, so switching decks loses neither.
+    if (!done) list = list.filter(e => entryDone(e) || entryDeck(e) !== D);
     list.unshift({
-      key: localKey, spread: spread.id, variant: variantIndex, placed, deck, cutDone,
+      key: localKey, deckId: D.id, spread: spread.id, variant: variantIndex, placed, reversed, deck, cutDone,
       question: $('question').value, impression: $('impression').value, drawnAt, at: new Date().toISOString(),
     });
   }
@@ -404,8 +487,10 @@ function resumeLocal(e) {
     return showHome();
   }
   beginTransition();
-  setupSpread(spreads.find(sp => sp.id === e.spread), e.variant);
+  setDeck(entryDeck(e).id);
+  setupSpread(findSpread(e.spread), e.variant);
   placed = e.placed;
+  reversed = e.reversed ?? null;
   deck = e.deck;
   cutDone = e.cutDone || isParadox() && placed.length >= 2;
   fanMode = 'fan';
@@ -431,15 +516,17 @@ async function saveKeptReadings() {
     // The entry stays stored until the journal confirms it; only this page's claim hides it.
     claim(e.key);
     if (!$('pickerView').hidden) renderLocal();
-    const s = spreads.find(sp => sp.id === e.spread);
+    const dk = entryDeck(e);
+    const s = findSpread(e.spread, dk);
     const at = e.drawnAt || e.at;
+    const rev = e.reversed ?? null;
     try {
       await api('readings', {
         method: 'POST',
         body: JSON.stringify({
-          spread: e.spread, variant: e.variant, question: (e.question || '').trim(),
-          impression: (e.impression || '').trim(), cards: e.placed, created_at: at,
-          summary: readingText({ spread: s, variant: e.variant, cards: e.placed, question: e.question, impression: e.impression, date: at }),
+          deck: dk.id, spread: e.spread, variant: e.variant, question: (e.question || '').trim(),
+          impression: (e.impression || '').trim(), cards: e.placed, reversed: rev, created_at: at,
+          summary: readingText({ dk, spread: s, variant: e.variant, cards: e.placed, reversed: rev, question: e.question, impression: e.impression, date: at }),
         }),
       });
       dropLocal(e.key);
@@ -459,10 +546,10 @@ async function saveKeptReadings() {
 function renderLocal() {
   const list = $('localList');
   list.replaceChildren();
-  const entries = localReadings().filter(e => validEntry(e) && !savingKeys.has(e.key));
+  const entries = localReadings().filter(e => entryDeck(e) === D && validEntry(e) && !savingKeys.has(e.key));
   $('localBlock').hidden = !entries.length;
   entries.forEach(e => {
-    const s = spreads.find(sp => sp.id === e.spread);
+    const s = findSpread(e.spread);
     const total = s.variants[e.variant].positions.length;
     const li = document.createElement('li');
     li.innerHTML = `
@@ -493,21 +580,21 @@ function recentSpreads() {
 }
 
 function rememberSpread() {
-  const list = recentSpreads().filter(r => r.spread !== spread.id || r.variant !== variantIndex);
-  list.unshift({ spread: spread.id, variant: variantIndex });
-  try { localStorage.setItem('tarot-recent', JSON.stringify(list.slice(0, 4))); } catch {}
+  const list = recentSpreads().filter(r => readingDeck(r) !== D || r.spread !== spread.id || r.variant !== variantIndex);
+  list.unshift({ deck: D.id, spread: spread.id, variant: variantIndex });
+  try { localStorage.setItem('tarot-recent', JSON.stringify(list.slice(0, 8))); } catch {}
 }
 
 function renderRecent() {
   const row = $('recentRow');
   row.replaceChildren();
   const recent = recentSpreads().filter(r => {
-    const s = spreads.find(sp => sp.id === r.spread);
+    const s = readingDeck(r) === D && findSpread(r.spread);
     return s && Number.isInteger(r.variant) && r.variant >= 0 && r.variant < s.variants.length;
-  });
+  }).slice(0, 4);
   $('recentBlock').hidden = !recent.length;
   recent.forEach(r => {
-    const s = spreads.find(sp => sp.id === r.spread);
+    const s = findSpread(r.spread);
     const a = document.createElement('a');
     a.className = 'recent-tile';
     a.href = spreadHash(s, r.variant);
@@ -559,29 +646,34 @@ function spreadHash(s = spread, v = variantIndex) {
 }
 
 function openSpread(id, variant = 0) {
-  const s = spreads.find(sp => sp.id === id);
+  const s = findSpread(id);
   if (!s) return showHome();
   beginTransition();  // before anything about the old reading is replaced
   setupSpread(s, Number.isInteger(variant) && variant >= 0 ? variant : 0);
   $('question').value = '';
   newReading();
-  track(`Spread: ${s.name}`);
+  track(`Spread: ${s.name}${D.id === 'osho' ? '' : ` (${D.title})`}`);
 }
 
-// Opens a finished reading from a link: #r?s=<spread>&v=<variant>&c=<cards>&q=<question>&id=<journal id>
+// Opens a finished reading from a link:
+// #r?d=<deck>&s=<spread>&v=<variant>&c=<cards>&rv=<0 or 1 per card>&q=<question>&id=<journal id>
+// `d` is left out for the Osho Zen deck, `rv` when reversals were off.
 function openSharedReading(params) {
-  const s = spreads.find(sp => sp.id === params.get('s'));
+  setDeck(DECKS[params.get('d')] ? params.get('d') : 'osho');
+  const s = findSpread(params.get('s'));
   if (!s) return showHome();
   const v = Number(params.get('v') ?? 0);
   const cards = (params.get('c') || '').split('-').map(Number);
   if (!Number.isInteger(v) || v < 0 || v >= s.variants.length) return openSpread(s.id);
   const valid = cards.length === s.variants[v].positions.length &&
-    cards.every(n => Number.isInteger(n) && n >= 1 && n <= TOTAL_CARDS) && new Set(cards).size === cards.length;
+    cards.every(n => Number.isInteger(n) && n >= 1 && n <= D.total) && new Set(cards).size === cards.length;
   if (!valid) return openSpread(s.id);
+  const rv = params.get('rv');
   beginTransition();
   setupSpread(s, v);
   placed = cards;
-  deck = shuffle(Array.from({ length: TOTAL_CARDS }, (_, i) => i + 1).filter(n => !cards.includes(n)));
+  reversed = D.reversals && rv && rv.length === cards.length && /^[01]+$/.test(rv) ? [...rv].map(c => c === '1') : null;
+  deck = shuffle(allCards().filter(n => !cards.includes(n)));
   cutDone = true;
   fanMode = 'fan';
   $('question').value = params.get('q') || '';
@@ -625,8 +717,9 @@ function setReadOnly(on) {
 
 function newReading() {
   beginTransition();
-  deck = shuffle(Array.from({ length: TOTAL_CARDS }, (_, i) => i + 1));
+  deck = shuffle(allCards());
   placed = [];
+  reversed = null;
   fanMode = 'fan';
   cutDone = false;
   resetJournalState();
@@ -644,7 +737,7 @@ function renderBoard() {
   slots.forEach((slot, i) => {
     slot.dataset.index = i;
     if (placed[i]) {
-      fillSlot(slot, placed[i], false);
+      fillSlot(slot, placed[i], false, isRev(i));
     } else {
       slot.classList.add('empty');
       slot.innerHTML = `<span class="slot-num">${i + 1}</span>`;
@@ -656,10 +749,10 @@ function slotAt(i) {
   return $('board').querySelector(`.slot[data-index="${i}"]`);
 }
 
-function fillSlot(slot, n, animate) {
+function fillSlot(slot, n, animate, rev) {
   slot.classList.remove('empty', 'next');
   slot.innerHTML = `
-    <button class="card3d" aria-label="${cardName(n)}">
+    <button class="card3d${rev ? ' reversed' : ''}" aria-label="${cardName(n)}${rev ? ', reversed' : ''}">
       <span class="face back"></span>
       <span class="face front"><img src="${cardThumb(n)}" alt=""></span>
     </button>`;
@@ -706,6 +799,7 @@ function update() {
   $('fan').classList.toggle('closed', done);
   $('fan').inert = done;
   $('deckControls').hidden = done || placed.length > 0 || fanMode === 'piles' || (isParadox() && cutDone);
+  renderReversalsButton();
 
   const list = $('positions');
   list.replaceChildren();
@@ -716,7 +810,7 @@ function update() {
     li.innerHTML = '<span class="pos-num"></span><span class="pos-text"><span class="pos-label"></span><span class="pos-card"></span></span>';
     li.querySelector('.pos-num').textContent = i + 1;
     li.querySelector('.pos-label').textContent = p.label;
-    li.querySelector('.pos-card').textContent = n ? cardName(n) : '';
+    li.querySelector('.pos-card').textContent = n ? cardName(n) + (isRev(i) ? ', reversed' : '') : '';
     if (n) li.addEventListener('click', () => openCard(n, i));
     list.appendChild(li);
   });
@@ -896,11 +990,15 @@ function place(cardEl) {
   play('slide');
   deck = deck.filter(c => c !== n);
   placed.push(n);
+  // Whether reversals are in play is settled by the first card, so the reading keeps it.
+  if (index === 0) reversed = D.reversals && reversals ? [] : null;
+  const rev = !!reversed && randomInt(2) === 1;
+  if (reversed) reversed.push(rev);
   new Image().src = cardThumb(n);
 
   if (reducedMotion.matches) {
     cardEl.remove();
-    fillSlot(slot, n, false);
+    fillSlot(slot, n, false, rev);
     layoutFan();
     return Promise.resolve();
   }
@@ -935,7 +1033,7 @@ function place(cardEl) {
       flyer.remove();
       if (isCurrent(g)) {
         play('place');
-        fillSlot(slot, n, true);
+        fillSlot(slot, n, true, rev);
       }
       resolve();
     };
@@ -956,6 +1054,8 @@ function undo() {
   clearTimeout(questionTimer);
   questionTimer = null;
   const n = placed.pop();
+  reversed?.pop();
+  if (!placed.length) reversed = null;
   deck.splice(randomInt(deck.length + 1), 0, n);
   drawnAt = null;
   renderBoard();
@@ -982,7 +1082,8 @@ function changeVariant() {
 // ---------- links ----------
 
 function shareHash() {
-  const p = new URLSearchParams({ s: spread.id, v: variantIndex, c: placed.join('-') });
+  const p = new URLSearchParams({ ...(D.id !== 'osho' && { d: D.id }), s: spread.id, v: variantIndex, c: placed.join('-') });
+  if (reversed) p.set('rv', reversed.map(Number).join(''));
   const q = $('question').value.trim();
   if (q) p.set('q', q);
   if (readingId) p.set('id', readingId);
@@ -1046,7 +1147,7 @@ async function saveReading() {
     r = await api('readings', {
       method: 'POST',
       body: JSON.stringify({
-        spread: spread.id, variant: variantIndex, ...words, cards: placed, summary: readingText(),
+        deck: D.id, spread: spread.id, variant: variantIndex, ...words, cards: placed, reversed, summary: readingText(),
         ...(drawnAt && { created_at: drawnAt }),
       }),
     });
@@ -1147,7 +1248,8 @@ async function loadReading(id) {
   verified = true;
   setReadOnly(false);
   // A link whose cards were edited by hand must not pass for the saved reading.
-  if (r.spread !== spread.id || r.variant !== variantIndex || r.cards.join('-') !== placed.join('-')) {
+  if (readingDeck(r) !== D || r.spread !== spread.id || r.variant !== variantIndex || r.cards.join('-') !== placed.join('-') ||
+      JSON.stringify(r.reversed ?? null) !== JSON.stringify(reversed)) {
     const link = readingLink(r);
     history.replaceState(null, '', link);
     return openSharedReading(new URLSearchParams(link.slice(3)));
@@ -1306,7 +1408,15 @@ async function showJournal(refresh = false) {
   const g = gen;
   spread = null;
   showView('journal');
-  if (!refresh) window.scrollTo(0, 0);
+  if (!refresh) {
+    window.scrollTo(0, 0);
+    // What is on screen may be another deck's journal: nothing of it stays usable while loading.
+    journalReadings = [];
+    selectedCard = null;
+    $('journalSearch').value = '';
+    $('journalList').replaceChildren();
+    $('searchCount').hidden = $('recurringBlock').hidden = $('suitsBlock').hidden = true;
+  }
   $('journalSummary').textContent = 'Loading…';
   let readings;
   try {
@@ -1316,7 +1426,9 @@ async function showJournal(refresh = false) {
     return;
   }
   if (!isCurrent(g)) return;
-  journalReadings = readings;
+  // Each deck keeps its own journal.
+  journalReadings = readings.filter(r => readingDeck(r) === D);
+  readings = journalReadings;
   if (!refresh) {
     $('journalSearch').value = '';
     selectedCard = null;
@@ -1366,7 +1478,8 @@ function renderJournalSummary(readings) {
 }
 
 function readingLink(r) {
-  const p = new URLSearchParams({ s: r.spread, v: r.variant, c: r.cards.join('-') });
+  const p = new URLSearchParams({ ...(r.deck && r.deck !== 'osho' && { d: r.deck }), s: r.spread, v: r.variant, c: r.cards.join('-') });
+  if (r.reversed) p.set('rv', r.reversed.map(Number).join(''));
   if (r.question) p.set('q', r.question);
   p.set('id', r.id);
   return `#r?${p}`;
@@ -1382,7 +1495,7 @@ function renderJournalList() {
   $('searchCount').hidden = !term;
   $('searchCount').textContent = `${readings.length} of ${journalReadings.length} readings`;
   readings.forEach(r => {
-    const s = spreads.find(sp => sp.id === r.spread);
+    const s = findSpread(r.spread);
     const li = document.createElement('li');
     li.innerHTML = `
       <a class="journal-item">
@@ -1404,11 +1517,12 @@ function renderJournalList() {
       li.querySelector('.journal-match').textContent = excerpt(hit, term);
     }
     const cardsEl = li.querySelector('.journal-cards');
-    r.cards.forEach(n => {
+    r.cards.forEach((n, i) => {
       const img = document.createElement('img');
+      const rev = !!r.reversed?.[i];
       img.src = cardThumb(n);
-      img.alt = cardName(n);
-      img.title = cardName(n);
+      img.alt = img.title = cardName(n) + (rev ? ', reversed' : '');
+      img.classList.toggle('reversed', rev);
       img.loading = 'lazy';
       cardsEl.appendChild(img);
     });
@@ -1442,11 +1556,11 @@ function renderSuits(readings) {
   suits.hidden = !readings.length;
   if (!readings.length) return;
   suits.innerHTML = '<h2>Suits</h2><p class="pattern-note">Share of all cards drawn. The tick marks what a perfectly even draw would give.</p>';
-  const max = Math.max(...SUITS.map(s => Math.max(drawn.filter(n => suitOf(n) === s).length / drawn.length, SUIT_SIZE[s] / TOTAL_CARDS)));
-  SUITS.forEach(s => {
-    const count = drawn.filter(n => suitOf(n) === s).length;
+  const max = Math.max(...D.suits.map(s => Math.max(drawn.filter(n => D.suitOf(n) === s).length / drawn.length, D.suitSize[s] / D.total)));
+  D.suits.forEach(s => {
+    const count = drawn.filter(n => D.suitOf(n) === s).length;
     const share = count / drawn.length;
-    const expected = SUIT_SIZE[s] / TOTAL_CARDS;
+    const expected = D.suitSize[s] / D.total;
     const row = document.createElement('div');
     row.className = 'suit-row';
     row.title = `${s}: ${count} of ${drawn.length} cards (${Math.round(share * 100)}%), an even draw gives ${Math.round(expected * 100)}%`;
@@ -1510,7 +1624,7 @@ function cardReadings(n, readings) {
   box.querySelector('button').addEventListener('click', () => openCard(n, null));
   readings.filter(r => r.cards.includes(n)).forEach(r => {
     const i = r.cards.indexOf(n);
-    const label = spreads.find(sp => sp.id === r.spread)?.variants[r.variant]?.positions[i]?.label;
+    const label = findSpread(r.spread)?.variants[r.variant]?.positions[i]?.label;
     const li = document.createElement('li');
     li.innerHTML = '<a><span class="journal-date"></span><span class="card-readings-question"></span><span class="card-readings-position"></span></a>';
     li.querySelector('a').href = readingLink(r);
@@ -1525,30 +1639,24 @@ function cardReadings(n, readings) {
 // ---------- copy for Claude ----------
 
 // The reading as plain text with everything an assistant needs and nothing it has to look
-// up: the question, the spread, a note on the deck, and each card's full Osho text and
-// commentary. "Copy reading" gives it, and the journal stores the same text.
-const DECK_NOTE = [
-  'About the deck: the Osho Zen Tarot is about understanding the here and now, not predicting the future.',
-  'The Major Arcana (0 to XXI, plus The Master) are the central themes of the spiritual journey; when one appears it carries special weight, and a reading without any suggests a passing chapter rather than a turning point.',
-  'The four suits: Fire is action and response, following the gut; Water is the emotions, receptive; Clouds is the mind, which hides the light but comes and goes; Rainbows is the practical, material side of life, earth and spirit as one.',
-  "Treat the cards and Osho's words as a mirror for reflection, not as facts, predictions, or medical or psychological diagnoses, and read positions about the future or past lives in that same reflective way.",
-].join(' ');
-
+// up: the question, the spread, a note on the deck, and each card's full text (for the Osho
+// Zen deck, Osho's text and the commentary). "Copy reading" gives it, and the journal
+// stores the same text.
 // From this many cards on, a spread gets a synthesis rather than a reading of every card.
 const BIG_SPREAD = 6;
 
 function currentReading() {
-  return { spread, variant: variantIndex, cards: placed, ...ownWords(), date: drawnAt };
+  return { dk: D, spread, variant: variantIndex, cards: placed, reversed, ...ownWords(), date: drawnAt };
 }
 
-function readingText({ spread, variant: v, cards, question = '', impression = '', date } = currentReading()) {
+function readingText({ dk, spread, variant: v, cards, reversed, question = '', impression = '', date } = currentReading()) {
   const variant = spread.variants[v];
   const ps = variant.positions;
   question = question.trim();
   impression = impression.trim();
   const clean = t => t.replace(/\r\n/g, '\n').trim();
   const lines = [
-    `Osho Zen Tarot reading, ${(date ? new Date(date) : new Date()).toISOString().slice(0, 10)}`,
+    `${dk.title} reading, ${(date ? new Date(date) : new Date()).toISOString().slice(0, 10)}`,
     '',
     `Question: ${question || '(none; read it as a general reading for here and now)'}`,
     ...(impression ? ['', `My first impression, written before reading the card texts: ${impression}`] : []),
@@ -1556,10 +1664,11 @@ function readingText({ spread, variant: v, cards, question = '', impression = ''
     `Spread: ${spread.name}${variant.name ? ` (${variant.name})` : ''}`,
     spread.intro,
     '',
-    DECK_NOTE,
+    dk.note,
+    ...(reversed ? ['', 'Reversed cards were in play: each card came up upright or reversed at random, and the reversed ones are marked.'] : []),
     '',
     'Cards, by position:',
-    ...ps.map((p, i) => `${i + 1}. ${p.label}: ${cardName(cards[i])} (${cardRank(cards[i])})`),
+    ...ps.map((p, i) => `${i + 1}. ${p.label}: ${cardName(cards[i], dk)}${reversed?.[i] ? ', reversed' : ''} (${cardRank(cards[i], dk)})`),
   ];
   ps.forEach((p, i) => {
     const n = cards[i];
@@ -1568,13 +1677,9 @@ function readingText({ spread, variant: v, cards, question = '', impression = ''
       '---',
       '',
       `${i + 1}. ${p.label}`,
-      `${cardName(n)} (${cardRank(n)})`,
+      `${cardName(n, dk)}${reversed?.[i] ? ', reversed' : ''} (${cardRank(n, dk)})`,
       '',
-      'Osho on this card:',
-      clean(cardData[n].text),
-      '',
-      'Commentary:',
-      clean(cardData[n].commentary),
+      ...dk.about(n, !!reversed?.[i]).map(clean),
     );
   });
   lines.push(
@@ -1636,13 +1741,17 @@ function openCard(n, positionIndex) {
   const img = $('detailImage');
   img.onerror = () => { img.onerror = null; img.src = cardThumb(n); };  // offline: the thumbnail is cached
   img.src = cardImage(n);
-  $('detailImage').alt = cardName(n);
+  const rev = positionIndex != null && isRev(positionIndex);
+  img.classList.toggle('reversed', rev);
+  img.alt = cardName(n) + (rev ? ', reversed' : '');
   $('detailName').textContent = cardName(n);
-  $('detailSuit').textContent = cardRank(n);
+  $('detailSuit').textContent = cardRank(n) + (rev ? ' · Reversed' : '');
   $('detailPosition').textContent =
     positionIndex == null ? '' : `Position ${positionIndex + 1} · ${positions()[positionIndex].label}`;
-  paragraphs($('detailText'), cardData[n].text);
-  paragraphs($('detailCommentary'), cardData[n].commentary);
+  const [[, text], [heading, second]] = D.texts(n, rev);
+  paragraphs($('detailText'), text);
+  $('detailHeading').textContent = heading;
+  paragraphs($('detailCommentary'), second);
   const dialog = $('cardDialog');
   if (!dialog.open) dialog.showModal();
   dialog.querySelector('.card-detail-text').scrollTop = 0;
@@ -1657,15 +1766,14 @@ function stepCard(delta) {
 
 function renderBrowse() {
   const grid = $('browseGrid');
-  SUITS.forEach(suit => {
+  grid.replaceChildren();
+  D.suits.forEach(suit => {
     const h = document.createElement('h3');
     h.textContent = suit;
     const group = document.createElement('div');
     group.className = 'browse-group';
-    // `ranks` lists the cards in deck order
-    for (const name of Object.keys(ranks)) {
-      const n = cardNames.indexOf(name) + 1;
-      if (suitOf(n) !== suit) continue;
+    for (const n of D.order()) {
+      if (D.suitOf(n) !== suit) continue;
       const b = document.createElement('button');
       b.className = 'browse-card';
       b.innerHTML = `<img loading="lazy" src="${cardThumb(n)}" alt=""><span></span>`;
@@ -1702,6 +1810,55 @@ function flipCoin() {
   track('Heads or Tails Button');
 }
 
+// ---------- the deck switch ----------
+
+// Switches the whole site to another deck; the caller decides what to show next. A reading
+// on screen belongs to the deck it was drawn with, so it is left first: a question edit
+// still waiting goes out while its deck is current.
+function setDeck(id) {
+  if (!DECKS[id] || DECKS[id] === D) return;
+  beginTransition();
+  spread = null;
+  D = DECKS[id];
+  try { localStorage.setItem('tarot-deck', D.id); } catch {}
+  renderDeck();
+}
+
+function renderDeck() {
+  document.body.dataset.deck = D.id;
+  document.title = D.title;
+  $('brand').textContent = D.title;
+  document.querySelectorAll('#deckSwitch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.deck === D.id)));
+  $('journalTitle').textContent = D.id === 'osho' ? 'Journal' : `Journal · ${D.title}`;
+  renderDaily();
+  renderPicker();
+  renderBrowse();
+}
+
+function onDeckSwitch(id) {
+  if (DECKS[id] === D) return;
+  const toJournal = location.hash === '#journal';
+  if (location.hash && !toJournal) history.pushState(null, '', location.pathname + location.search);
+  setDeck(id);
+  if (toJournal) showJournal();
+  else showHome();
+  track(`Deck: ${D.title}`);
+}
+
+function renderReversalsButton() {
+  const b = $('reversalsButton');
+  b.hidden = !D.reversals;
+  b.textContent = reversals ? 'Reversed cards: on' : 'Reversed cards: off';
+  b.setAttribute('aria-pressed', String(reversals));
+  b.classList.toggle('on', reversals);
+}
+
+function toggleReversals() {
+  reversals = !reversals;
+  try { localStorage.setItem('tarot-reversals', reversals ? 'on' : 'off'); } catch {}
+  renderReversalsButton();
+}
+
 function track(name) {
   if (window.goatcounter?.count) {
     window.goatcounter.count({ path: name, title: name, event: true });
@@ -1720,12 +1877,13 @@ function route(initial = false) {
   const kept = initial ? localReadings().filter(validEntry) : [];
   if (h.startsWith('r?')) {
     const params = new URLSearchParams(location.hash.slice(3));
-    const e = !params.get('id') && kept.find(x => x.spread === params.get('s') &&
+    const e = !params.get('id') && kept.find(x => entryDeck(x).id === (params.get('d') || 'osho') && x.spread === params.get('s') &&
+      (x.reversed ? x.reversed.map(Number).join('') : null) === params.get('rv') &&
       String(x.variant) === (params.get('v') ?? '0') && x.placed.join('-') === params.get('c'));
     return e ? resumeLocal(e) : openSharedReading(params);
   }
   const [id, v = '0'] = h.split('/');
-  const e = kept.find(x => x.spread === id && String(x.variant) === v && !entryDone(x));
+  const e = kept.find(x => entryDeck(x) === D && x.spread === id && String(x.variant) === v && !entryDone(x));
   if (e) return resumeLocal(e);
   openSpread(id, Number(v));
 }
@@ -1739,6 +1897,8 @@ $('browseButton').addEventListener('click', () => $('browseDialog').showModal())
 $('coinButton').addEventListener('click', () => { $('coinDialog').showModal(); flipCoin(); });
 $('flipAgain').addEventListener('click', flipCoin);
 $('soundButton').addEventListener('click', toggleSound);
+$('reversalsButton').addEventListener('click', toggleReversals);
+document.querySelectorAll('#deckSwitch button').forEach(b => b.addEventListener('click', () => onDeckSwitch(b.dataset.deck)));
 $('copyButton').addEventListener('click', () => copyText(readingText(), 'Reading copied.'));
 $('linkButton').addEventListener('click', () => copyText(location.href, 'Link copied.'));
 $('undoButton').addEventListener('click', undo);
@@ -1774,9 +1934,7 @@ renderSoundButton();
 if (sound.on) loadSounds();
 // Browsers start audio suspended until the first tap or click.
 document.addEventListener('pointerdown', () => { if (sound.on) audio(); }, { once: true });
-renderDaily();
-renderPicker();
-renderBrowse();
+renderDeck();
 detectServer().then(() => {
   route(true);
   saveKeptReadings();

@@ -18,7 +18,7 @@ trap 'rm -f "$ARCHIVE"' EXIT
 # --no-xattrs: macOS tags files with provenance attributes GNU tar on the host warns about.
 COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" \
   index.html styles.css script.js sw.js manifest.webmanifest js \
-  assets/CardPictures assets/CardText assets/CardCommentary assets/UserGuide \
+  assets/CardPictures assets/rws assets/CardText assets/CardCommentary assets/UserGuide \
   assets/icons assets/sounds assets/EBGaramond.ttf assets/favicon.ico \
   server/app.py server/tarot.service
 ssh "$HOST" 'cat > /tmp/tarot-deploy.tgz' < "$ARCHIVE"

@@ -11,6 +11,7 @@ import secrets
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -34,7 +35,9 @@ CREATE TABLE IF NOT EXISTS readings (
     interpreted_at  TEXT,
     summary         TEXT NOT NULL DEFAULT '',  -- the whole reading as plain text, card texts included
     deleted_at      TEXT,                      -- set by DELETE; the row stays so it can be restored
-    impression      TEXT NOT NULL DEFAULT ''   -- Batu's first impression, written before the card texts
+    impression      TEXT NOT NULL DEFAULT '',  -- Batu's first impression, written before the card texts
+    deck            TEXT NOT NULL DEFAULT 'osho',  -- 'osho' (Osho Zen) or 'rws' (Rider-Waite); each has its own journal
+    reversed        TEXT NOT NULL DEFAULT ''   -- "0,1,0" per card when reversals were in play, else empty
 );
 -- Dated notes written when coming back to a reading later.
 CREATE TABLE IF NOT EXISTS notes (
@@ -71,6 +74,10 @@ with db() as conn:
         conn.execute("ALTER TABLE readings ADD COLUMN deleted_at TEXT")
     if "impression" not in columns:
         conn.execute("ALTER TABLE readings ADD COLUMN impression TEXT NOT NULL DEFAULT ''")
+    if "deck" not in columns:
+        conn.execute("ALTER TABLE readings ADD COLUMN deck TEXT NOT NULL DEFAULT 'osho'")
+    if "reversed" not in columns:
+        conn.execute("ALTER TABLE readings ADD COLUMN reversed TEXT NOT NULL DEFAULT ''")
 
 
 def purge(conn: sqlite3.Connection) -> None:
@@ -93,6 +100,7 @@ def now() -> str:
 def row_to_dict(row: sqlite3.Row, notes: list[dict], earlier: list[dict]) -> dict:
     d = dict(row)
     d["cards"] = [int(c) for c in d["cards"].split(",") if c]
+    d["reversed"] = [c == "1" for c in d["reversed"].split(",")] if d["reversed"] else None
     d.pop("deleted_at", None)
     d["notes"] = notes
     d["earlier"] = earlier
@@ -136,12 +144,19 @@ def get_row(conn: sqlite3.Connection, reading_id: str, deleted: bool = False) ->
     return with_children(conn, [row])[0]
 
 
+# Cards per deck; card numbers run from 1 to this.
+DECK_SIZE = {"osho": 79, "rws": 78}
+
+
 class NewReading(BaseModel):
+    deck: Literal["osho", "rws"] = "osho"
     spread: str = Field(max_length=64)
     variant: int = Field(default=0, ge=0, le=64)
     question: str = Field(default="", max_length=4000)
     impression: str = Field(default="", max_length=4000)
     cards: list[int] = Field(min_length=1, max_length=79)
+    # One flag per card when reversals were in play (Rider-Waite only); left out otherwise.
+    reversed: list[bool] | None = None
     summary: str = Field(default="", max_length=200_000)
     # When the spread was completed; the page sends it so that a reading kept on the device
     # while the journal was out of reach is saved under the day it was drawn.
@@ -203,16 +218,20 @@ def get_reading(reading_id: str) -> dict:
 
 @app.post("/api/readings", status_code=201)
 def create_reading(body: NewReading) -> dict:
-    if any(not 1 <= c <= 79 for c in body.cards) or len(set(body.cards)) != len(body.cards):
-        raise HTTPException(422, "cards must be distinct numbers from 1 to 79")
+    size = DECK_SIZE[body.deck]
+    if any(not 1 <= c <= size for c in body.cards) or len(set(body.cards)) != len(body.cards):
+        raise HTTPException(422, f"cards must be distinct numbers from 1 to {size}")
+    if body.reversed is not None and (body.deck != "rws" or len(body.reversed) != len(body.cards)):
+        raise HTTPException(422, "reversed needs the Rider-Waite deck and one flag per card")
     created = stamp(body.created_at)
     reading_id = f"{created[:10]}-{secrets.token_hex(3)}"
+    reversed_ = ",".join("1" if r else "0" for r in body.reversed) if body.reversed is not None else ""
     with db() as conn:
         conn.execute(
-            "INSERT INTO readings (id, created_at, spread, variant, question, impression, cards, summary)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (reading_id, created, body.spread, body.variant, body.question, body.impression,
-             ",".join(str(c) for c in body.cards), body.summary),
+            "INSERT INTO readings (id, created_at, deck, spread, variant, question, impression, cards, reversed, summary)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (reading_id, created, body.deck, body.spread, body.variant, body.question, body.impression,
+             ",".join(str(c) for c in body.cards), reversed_, body.summary),
         )
         return get_row(conn, reading_id)
 
