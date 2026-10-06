@@ -64,6 +64,14 @@
 
       <h1>Choose a spread</h1>
       <p class="lede">Pick a layout, hold your question in mind, and draw from the deck.</p>
+      <form class="ask-jev" id="askJev" hidden>
+        <label class="field">
+          <span>Not sure which one? Ask Jev</span>
+          <textarea id="askQuestion" rows="2" placeholder="Your question"></textarea>
+        </label>
+        <button class="ghost" id="askSubmit" type="submit">Submit</button>
+        <ol class="ask-result" id="askResult"></ol>
+      </form>
       <div class="spread-grid" id="spreadGrid"></div>
     </section>
 

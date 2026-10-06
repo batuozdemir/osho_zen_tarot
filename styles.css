@@ -186,6 +186,31 @@ main {
   .spread-tile:hover .tile-hint, .spread-tile:focus-visible .tile-hint { opacity: 1; }
 }
 
+/* ---------- asking Jev which spread ---------- */
+
+.ask-jev { display: flex; flex-direction: column; gap: 10px; max-width: 640px; margin: 0 0 28px; }
+.ask-jev > .ghost { align-self: flex-start; padding: 8px 18px; font-size: 16px; }
+.ask-result { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ask-result:empty { display: none; }
+.ask-status { color: var(--muted); font-size: 16px; }
+
+/* Each likely spread with its score, the bar behind it as wide as the probability. */
+.ask-result a {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+  background: linear-gradient(to right, var(--gold-soft) calc(var(--p) * 100%), var(--surface) 0);
+  transition: border-color 0.2s;
+}
+
+.ask-result a:hover { border-color: var(--gold); }
+.ask-score { color: var(--gold); font-variant-numeric: tabular-nums; }
+
 /* ---------- reading ---------- */
 
 .reading-head { margin-bottom: 16px; }

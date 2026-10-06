@@ -6,9 +6,12 @@ decides who gets in; there is no auth of its own (same reasoning as `transcribe`
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import sqlite3
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -201,7 +204,51 @@ app = FastAPI(title="tarot")
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True}
+    # `jev` tells the page whether to offer "Ask Jev which spread" on the home page.
+    return {"ok": True, "jev": bool(OPENROUTER_KEY)}
+
+
+# Jev (TypeSafe, through OpenRouter) is a decision model: given the question and the
+# spreads with their descriptions, it returns a probability for each spread, adding up to 1.
+# One yes/no question per spread was tried instead (2026-10-07) and dropped: the general
+# spreads (Celtic Cross, Three Card, the Diamond) then scored high on nearly every question.
+# The key stays here on the server; on the host it comes from /etc/tarot/openrouter.env.
+OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+JEV_MODEL = os.environ.get("TAROT_JEV_MODEL", "typesafe/jev-1.13")
+
+
+class Recommend(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+    deck: str = Field(default="", max_length=64)
+    # Spread id -> what the spread is and what to use it for, for the spreads of the deck in use.
+    spreads: dict[str, str] = Field(min_length=2, max_length=64)
+
+
+@app.post("/api/recommend")
+def recommend(body: Recommend) -> dict:
+    if not OPENROUTER_KEY:
+        raise HTTPException(503, "Jev is not set up on this server")
+    request = urllib.request.Request(
+        "https://openrouter.ai/api/v1/systemone",
+        data=json.dumps({
+            "model": JEV_MODEL,
+            "state": {"deck": body.deck, "question": body.question},
+            "questions": {
+                "spread": {
+                    "type": "choice",
+                    "instructions": "Which tarot spread best suits asking the question in `question`?",
+                    "criteria": body.spreads,
+                },
+            },
+        }).encode(),
+        headers={"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as res:
+            answer = json.load(res)["answers"]["spread"]
+    except (urllib.error.URLError, TimeoutError, KeyError, ValueError) as e:
+        raise HTTPException(502, f"Jev did not answer: {e}") from e
+    return {"probabilities": answer["probabilities"], "confidence": answer.get("confidence")}
 
 
 @app.get("/api/readings")

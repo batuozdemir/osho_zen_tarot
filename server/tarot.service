@@ -9,6 +9,9 @@ Group=tarot
 WorkingDirectory=/opt/tarot
 Environment=TAROT_SITE_DIR=/opt/tarot/site
 Environment=TAROT_DB=/var/lib/tarot/journal.db
+# OPENROUTER_API_KEY=... for "Ask Jev which spread"; read by systemd as root, so the file
+# can be root-only (0600). Optional: without it the page simply does not offer Jev.
+EnvironmentFile=-/etc/tarot/openrouter.env
 # Creates /var/lib/tarot owned by the service user, and keeps it across restarts.
 StateDirectory=tarot
 # Readings are personal: only the service user can read them.

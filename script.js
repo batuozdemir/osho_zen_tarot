@@ -88,7 +88,7 @@ function beginTransition() {
 }
 
 // The journal exists only where the server answers (the tailnet copy, not GitHub Pages).
-const server = { on: false };
+const server = { on: false, jev: false };
 
 // ---------- decks ----------
 
@@ -391,6 +391,7 @@ function renderDaily() {
 }
 
 function renderPicker() {
+  clearAsk();
   const grid = $('spreadGrid');
   grid.replaceChildren();
   spreadsOf().forEach(s => {
@@ -705,12 +706,12 @@ function spreadHash(s = spread, v = variantIndex) {
   return v ? `#${s.id}/${v}` : `#${s.id}`;
 }
 
-function openSpread(id, variant = 0) {
+function openSpread(id, variant = 0, question = '') {
   const s = findSpread(id);
   if (!s) return showHome();
   beginTransition();  // before anything about the old reading is replaced
   setupSpread(s, Number.isInteger(variant) && variant >= 0 ? variant : 0);
-  $('question').value = '';
+  $('question').value = question;
   newReading();
   track(`Spread: ${s.name}${D.id === 'osho' ? '' : ` (${D.title})`}`);
 }
@@ -1242,15 +1243,73 @@ async function detectServer() {
     const ctrl = new AbortController();
     setTimeout(() => ctrl.abort(), 3000);
     const res = await fetch('api/health', { signal: ctrl.signal, cache: 'no-store' });
-    server.on = res.ok && (await res.json()).ok === true;
+    const health = res.ok ? await res.json() : {};
+    server.on = health.ok === true;
+    server.jev = server.on && health.jev === true;
   } catch {
-    server.on = false;
+    server.on = server.jev = false;
   }
+  $('askJev').hidden = !server.jev;
   if (server.on && !journalOrigin) {
     journalOrigin = true;
     try { localStorage.setItem('tarot-journal', 'yes'); } catch {}
   }
   $('journalLink').hidden = !server.on;
+}
+
+// ---------- asking Jev which spread (server only) ----------
+
+// Jev returns a probability for every spread of the deck in use; the likely ones are
+// listed, and opening one from the list takes the question along into the reading.
+let askGen = 0;
+let carriedQuestion = '';
+
+function clearAsk() {
+  askGen++;
+  $('askResult').replaceChildren();
+  $('askSubmit').disabled = false;
+}
+
+async function askJev(event) {
+  event.preventDefault();
+  const question = $('askQuestion').value.trim();
+  if (!question) return $('askQuestion').focus();
+  const list = spreadsOf();
+  const g = ++askGen;
+  $('askSubmit').disabled = true;
+  $('askResult').replaceChildren(Object.assign(document.createElement('li'), { className: 'ask-status', textContent: 'Asking Jev…' }));
+  let r;
+  try {
+    r = await api('recommend', {
+      method: 'POST',
+      body: JSON.stringify({
+        question, deck: D.title,
+        spreads: Object.fromEntries(list.map(s => [s.id, [s.name, ...(s.hint || [])].join(' ')])),
+      }),
+    });
+  } catch {
+    if (g !== askGen) return;
+    clearAsk();
+    toast('Jev did not answer.', { label: 'Retry', run: () => $('askJev').requestSubmit() });
+    return;
+  }
+  if (g !== askGen) return;
+  $('askSubmit').disabled = false;
+  const ranked = list.map(s => ({ s, p: r.probabilities[s.id] || 0 })).sort((a, b) => b.p - a.p);
+  // Spreads under 5% are left out, but the top one is always shown.
+  const shown = ranked.filter((x, i) => i === 0 || x.p >= 0.05);
+  $('askResult').replaceChildren(...shown.map(({ s, p }) => {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = `#${s.id}`;
+    a.style.setProperty('--p', p);
+    a.innerHTML = '<span class="ask-name"></span><span class="ask-score"></span>';
+    a.firstChild.textContent = s.name;
+    a.lastChild.textContent = `${Math.round(p * 100)}%`;
+    a.addEventListener('click', () => { carriedQuestion = question; });
+    li.appendChild(a);
+    return li;
+  }));
 }
 
 async function saveReading() {
@@ -2005,6 +2064,9 @@ function track(name) {
 // `initial` is the first route after the page loads: a reading kept on this device that
 // matches the address is resumed rather than started again.
 function route(initial = false) {
+  // A question asked of Jev, brought along by opening one of its spreads.
+  const q = carriedQuestion;
+  carriedQuestion = '';
   let h;
   try { h = decodeURIComponent(location.hash.slice(1)); } catch { return showHome(); }
   if (!h) return showHome();
@@ -2021,7 +2083,7 @@ function route(initial = false) {
   const [id, v = '0'] = h.split('/');
   const e = kept.find(x => entryDeck(x) === D && x.spread === id && String(x.variant) === v && !entryDone(x));
   if (e) return resumeLocal(e);
-  openSpread(id, Number(v));
+  openSpread(id, Number(v), q);
 }
 
 document.querySelectorAll('dialog').forEach(d => {
@@ -2049,6 +2111,11 @@ $('shuffleButton').addEventListener('click', shuffleDeck);
 $('cutButton').addEventListener('click', cutDeck);
 $('variantSelect').addEventListener('change', changeVariant);
 $('question').addEventListener('input', onWordsInput);
+$('askJev').addEventListener('submit', askJev);
+$('askQuestion').addEventListener('keydown', e => {
+  // Enter asks, Shift+Enter starts a new line.
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('askJev').requestSubmit(); }
+});
 $('impression').addEventListener('input', onWordsInput);
 $('detailPrev').addEventListener('click', () => stepCard(-1));
 $('detailNext').addEventListener('click', () => stepCard(1));

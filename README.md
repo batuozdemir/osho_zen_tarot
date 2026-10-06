@@ -27,6 +27,17 @@ finished reading that could not be saved (offline, server down) stays there too,
 loads with the journal reachable. The home page also has a "Use again" row of the last
 few spreads finished on that device.
 
+On the tailnet copy, above the spread tiles, a box asks Jev which spread fits a question.
+Jev (TypeSafe's decision model, called through OpenRouter by the server, never by the
+page) gets the question and every spread of the deck in use with its tile description,
+and returns a probability for each, adding up to 100%; the likely ones are listed with
+their scores, and opening one of them carries the question into the reading. When two
+spreads both fit, the probability is split between them. An independent score per spread
+was tried on 23 questions in English and Turkish (2026-10-07) and dropped: the general
+spreads (Celtic Cross, Three Card, the Diamond) scored high on nearly every personal
+question, so the list stopped telling them apart. The box only appears when the
+server has an OpenRouter key.
+
 It runs in two places from the same code:
 
 - **GitHub Pages** (public): everything except the journal.
@@ -64,14 +75,17 @@ uv venv && uv pip install fastapi uvicorn
 TAROT_DB=/tmp/journal-dev.db .venv/bin/uvicorn app:app --port 8765   # default: ~/.local/share/tarot/
 ```
 
-Then open http://127.0.0.1:8765. Without the server, any static file server works too;
+Then open http://127.0.0.1:8765. To try "Ask Jev", start it with `OPENROUTER_API_KEY` set
+(`TAROT_JEV_MODEL` overrides the model, `typesafe/jev-1.13` by default). Without the server, any static file server works too;
 the journal simply stays hidden.
 
 ## Deploying
 
 `server/deploy.sh` copies the site and the server to `vps-oci-1` and restarts the
 service. It is safe to rerun and never touches the database. The journal lives in
-`/var/lib/tarot/journal.db` (SQLite) on that host. Host-side details are recorded in
+`/var/lib/tarot/journal.db` (SQLite) on that host. The OpenRouter key for "Ask Jev" is
+not deployed: it is put by hand in `/etc/tarot/openrouter.env` (`OPENROUTER_API_KEY=...`,
+root-only, 0600), which the systemd unit reads if it exists. Host-side details are recorded in
 `~/Workspace/infra/hosts/vps-oci-1/host.md`.
 
 GitHub Pages deploys itself from `main` on push.
@@ -83,7 +97,8 @@ tailnet ACL decides who gets in.
 
 | Method | Path | Body | What |
 |---|---|---|---|
-| GET | `api/health` | | `{"ok": true}` |
+| GET | `api/health` | | `{"ok": true, "jev": bool}`; `jev` is whether an OpenRouter key is set |
+| POST | `api/recommend` | `{"question", "deck"?, "spreads": {id: description}}` | Asks Jev which spread suits the question; returns `{"probabilities": {id: p}, "confidence"}`, the probabilities adding up to 1. 503 without a key, 502 when Jev does not answer |
 | GET | `api/readings` | | All readings, newest first (`?limit=n` for only the latest) |
 | GET | `api/readings/{id}` | | One reading |
 | POST | `api/readings` | `{"deck"?, "spread", "variant", "question", "impression", "cards": [n, ...], "reversed"?, "rounds"?, "summary", "created_at"?}` | Saves a finished reading; `deck` is `osho` (default) or `rws`, `reversed` one flag per card when reversals were in play, `rounds` the cards per question of a question-by-question reading, `created_at` when it was drawn, for one saved late |
