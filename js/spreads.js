@@ -269,6 +269,23 @@ const spreads = [
       },
     ],
   },
+  // Not a layout but a sitting, the way a reader works: question after question, three
+  // cards each from the same deck, never reshuffled. `session` makes script.js build the
+  // positions as the reading goes; the positions here only draw the tile.
+  {
+    id: 'session',
+    decks: ['rws'],
+    session: true,
+    hint: ['Question after question from one deck: three cards each, a clarifier when they need one, then the next question.', 'Use it for a conversation with the cards, the way a reader works across a sitting.'],
+    name: 'Question by Question',
+    intro: 'A sitting rather than a fixed layout. Ask a question and draw three cards for it. If they need it, draw a clarifier: one more card that sheds light on the three. Readers often draw one when the three are all Major Arcana, to see how those big themes show up in daily life. Then ask the next question and draw three more from what is left of the same deck, without reshuffling. Finish when you have asked what you came to ask.',
+    variants: [{
+      positions: [
+        P('', 0, 0), P('', 1.15, 0), P('', 2.3, 0), P('', 3.45, 0),
+        P('', 0, 1.75), P('', 1.15, 1.75), P('', 2.3, 1.75),
+      ],
+    }],
+  },
   {
     id: 'horseshoe',
     decks: BOTH,

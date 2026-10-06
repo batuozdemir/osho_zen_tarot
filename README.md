@@ -5,7 +5,10 @@ Rider-Waite-Smith deck (1909). A switch in the top bar changes the whole site to
 deck (card of the day, browsing, spreads and journal); the choice is remembered on the
 device. With the Osho Zen deck there are 13 spreads; with Rider-Waite the five that are not
 specific to the Osho guidebook (single card, three cards, Celtic Cross in Waite's own form,
-horseshoe, decision). Rider-Waite readings can use reversed cards: a "Reversed cards"
+horseshoe, decision), plus "Question by Question": not a layout but a sitting, the way a
+reader works. Each question in turn gets three cards, then optional clarifiers (one more
+card that sheds light on the three, often drawn when they are all Major Arcana), all from
+the same deck without reshuffling, until the reading is finished by hand. Rider-Waite readings can use reversed cards: a "Reversed cards"
 button next to Shuffle turns them on before the first card, and each card then comes up
 upright or reversed at random.
 
@@ -83,7 +86,7 @@ tailnet ACL decides who gets in.
 | GET | `api/health` | | `{"ok": true}` |
 | GET | `api/readings` | | All readings, newest first (`?limit=n` for only the latest) |
 | GET | `api/readings/{id}` | | One reading |
-| POST | `api/readings` | `{"deck"?, "spread", "variant", "question", "impression", "cards": [n, ...], "reversed"?, "summary", "created_at"?}` | Saves a finished reading; `deck` is `osho` (default) or `rws`, `reversed` one flag per card when reversals were in play, `created_at` when it was drawn, for one saved late |
+| POST | `api/readings` | `{"deck"?, "spread", "variant", "question", "impression", "cards": [n, ...], "reversed"?, "rounds"?, "summary", "created_at"?}` | Saves a finished reading; `deck` is `osho` (default) or `rws`, `reversed` one flag per card when reversals were in play, `rounds` the cards per question of a question-by-question reading, `created_at` when it was drawn, for one saved late |
 | PATCH | `api/readings/{id}` | `{"question"?, "impression"?, "summary"?}` | Updates what Batu wrote (and the summary that quotes it); `PUT api/readings/{id}/question` is the old name |
 | GET | `api/readings/{id}/interpretation` | | The interpretation, its time and the earlier versions; what an open page polls |
 | PUT | `api/readings/{id}/interpretation` | `{"text"}` (Markdown) | Saves Claude's interpretation; a different text moves the previous one to `earlier`. An open page picks it up within seconds |
@@ -94,7 +97,10 @@ tailnet ACL decides who gets in.
 
 `cards` are card numbers in position order, in the reading's `deck` (`osho` or `rws`; each
 deck has its own journal on the page, the API lists both). `reversed` is a list of
-booleans per card, or null when reversals were off. `summary` is the whole reading as
+booleans per card, or null when reversals were off. `rounds` is null except for a
+question-by-question reading (`spread: "session"`): the number of cards each question got,
+in order, the first three of each being its cards and any more its clarifiers; its
+`question` then holds every question, one line each. `summary` is the whole reading as
 plain text: question, first impression, spread, a note on the deck, and every position
 with its card's full text (Osho's text and commentary, or the Rider-Waite meaning, with
 the reversed meaning first for a reversed card). It is the same text the "Copy reading" button

@@ -9,6 +9,10 @@ let variantIndex = 0;
 let deck = [];          // face-down card numbers, in fan order
 let placed = [];        // card number per position, in drawing order
 let reversed = null;    // per position, whether the card came up reversed; null when reversals are off
+// The question-by-question spread has no fixed positions: each question in turn gets its
+// cards, `{ question, cards }` per question, until the reading is finished by hand.
+let rounds = null;
+let finished = false;
 let flying = false;
 let fanMode = 'fan';    // 'fan' or 'piles' (while the deck is cut)
 let cutDone = false;
@@ -47,10 +51,22 @@ function flushQuestion() {
   }
 }
 
-// What Batu writes himself on a reading.
+// What Batu writes himself on a reading. A question-by-question reading keeps all its
+// questions in `question`, one line each, in order.
 function ownWords() {
-  return { question: $('question').value.trim(), impression: $('impression').value.trim() };
+  return { question: spread?.session ? joinQuestions(rounds) : $('question').value.trim(), impression: $('impression').value.trim() };
 }
+
+function joinQuestions(rs) {
+  const lines = rs.map(r => r.question.replace(/\s+/g, ' ').trim());
+  return lines.some(Boolean) ? lines.join('\n') : '';
+}
+
+// The other way: the questions of a reading with these card counts per question.
+const splitRounds = (counts, question) => {
+  const qs = (question || '').split('\n');
+  return counts.map((cards, i) => ({ question: qs[i] || '', cards }));
+};
 
 function beginTransition() {
   // A card in the air is already drawn: keep the reading with it, since the flight's own
@@ -325,21 +341,27 @@ function bounds(positions) {
   return { minX: minX - pad, minY: minY - pad, w: maxX - minX + 2 * pad, h: maxY - minY + 2 * pad };
 }
 
-// Lays positions out inside `el` as absolutely placed slots; returns the slots.
-function layout(el, positions) {
+// Lays positions out inside `el` as absolutely placed slots; returns the slots. With
+// `keep`, slots already there stay (with their cards) and only move: a reading that grows
+// card by card is laid out again without flipping every card anew.
+function layout(el, positions, keep = false) {
   const b = bounds(positions);
   el.style.setProperty('--ratio', b.w / b.h);
-  el.replaceChildren();
+  if (!keep) el.replaceChildren();
+  while (el.children.length > positions.length) el.lastChild.remove();
   return positions.map((p, i) => {
-    const slot = document.createElement('div');
-    slot.className = 'slot';
+    let slot = el.children[i];
+    if (!slot) {
+      slot = document.createElement('div');
+      slot.className = 'slot';
+      el.appendChild(slot);
+    }
     slot.style.left = `${((p.x - 0.5 - b.minX) / b.w) * 100}%`;
     slot.style.top = `${((p.y - 0.75 - b.minY) / b.h) * 100}%`;
     slot.style.width = `${(1 / b.w) * 100}%`;
     slot.style.height = `${(1.5 / b.h) * 100}%`;
     slot.style.zIndex = i + 1;
     if (p.rot) slot.style.transform = `rotate(${p.rot}deg)`;
-    el.appendChild(slot);
     return slot;
   });
 }
@@ -379,7 +401,8 @@ function renderPicker() {
     mini.className = 'mini-board';
     layout(mini, s.variants[0].positions);
     const counts = [...new Set(s.variants.map(v => v.positions.length))];
-    const count = counts.length > 1 ? `${Math.min(...counts)}–${Math.max(...counts)} cards` : `${counts[0]} card${counts[0] > 1 ? 's' : ''}`;
+    const count = s.session ? 'Three cards a question'
+      : counts.length > 1 ? `${Math.min(...counts)}–${Math.max(...counts)} cards` : `${counts[0]} card${counts[0] > 1 ? 's' : ''}`;
     tile.append(mini);
     tile.insertAdjacentHTML('beforeend', '<span class="tile-name"></span><span class="tile-count"></span>');
     tile.querySelector('.tile-name').textContent = s.name;
@@ -430,7 +453,15 @@ function dropLocal(key) {
 
 function entryDone(e) {
   const s = findSpread(e.spread, entryDeck(e));
+  if (s?.session) return !!e.finished;
   return !!s && e.placed.length >= s.variants[e.variant].positions.length;
+}
+
+// Questions of a question-by-question reading, from storage or a link: card counts that
+// add up to the cards drawn, every question but the last with its three cards at least.
+function validRounds(rs, cards, done) {
+  return Array.isArray(rs) && rs.length > 0 && rs.every(r => r && typeof r.question === 'string' && Number.isInteger(r.cards) && r.cards >= 0) &&
+    rs.slice(0, done ? undefined : -1).every(r => r.cards >= 3) && rs.reduce((t, r) => t + r.cards, 0) === cards.length;
 }
 
 // Reversed flags, from storage or a link: none at all, or one boolean per card.
@@ -444,7 +475,8 @@ function validEntry(e) {
   const s = e && findSpread(e.spread, dk);
   const ok = n => Number.isInteger(n) && n >= 1 && n <= dk.total;
   return !!s && Number.isInteger(e.variant) && e.variant >= 0 && e.variant < s.variants.length &&
-    Array.isArray(e.placed) && e.placed.every(ok) && e.placed.length <= s.variants[e.variant].positions.length &&
+    Array.isArray(e.placed) && e.placed.every(ok) &&
+    (s.session ? validRounds(e.rounds, e.placed, !!e.finished) : e.placed.length <= s.variants[e.variant].positions.length) &&
     Array.isArray(e.deck) && e.deck.every(ok) && new Set([...e.placed, ...e.deck]).size === e.placed.length + e.deck.length &&
     validReversed(e.reversed, e.placed);
 }
@@ -463,7 +495,8 @@ function keepLocal() {
     if (!done) list = list.filter(e => entryDone(e) || entryDeck(e) !== D);
     list.unshift({
       key: localKey, deckId: D.id, spread: spread.id, variant: variantIndex, placed, reversed, deck, cutDone,
-      question: $('question').value, impression: $('impression').value, drawnAt, at: new Date().toISOString(),
+      ...(rounds && { rounds, finished }),
+      question: rounds ? joinQuestions(rounds) : $('question').value, impression: $('impression').value, drawnAt, at: new Date().toISOString(),
     });
   }
   if (!storeLocal(list) && done && journalOrigin && !readingId && !keepLocal.warned) {
@@ -491,13 +524,15 @@ function resumeLocal(e) {
   setupSpread(findSpread(e.spread), e.variant);
   placed = e.placed;
   reversed = e.reversed ?? null;
+  rounds = spread.session ? e.rounds : null;
+  finished = spread.session && !!e.finished;
   deck = e.deck;
   cutDone = e.cutDone || isParadox() && placed.length >= 2;
   fanMode = 'fan';
   resetJournalState();
   localKey = e.key;
   drawnAt = e.drawnAt || (isDone() ? e.at : null);
-  $('question').value = e.question || '';
+  $('question').value = rounds ? rounds.at(-1).question : e.question || '';
   $('impression').value = e.impression || '';
   renderBoard();
   renderFan();
@@ -520,13 +555,15 @@ async function saveKeptReadings() {
     const s = findSpread(e.spread, dk);
     const at = e.drawnAt || e.at;
     const rev = e.reversed ?? null;
+    const rs = s.session ? e.rounds : null;
+    const question = rs ? joinQuestions(rs) : (e.question || '').trim();
     try {
       await api('readings', {
         method: 'POST',
         body: JSON.stringify({
-          deck: dk.id, spread: e.spread, variant: e.variant, question: (e.question || '').trim(),
-          impression: (e.impression || '').trim(), cards: e.placed, reversed: rev, created_at: at,
-          summary: readingText({ dk, spread: s, variant: e.variant, cards: e.placed, reversed: rev, question: e.question, impression: e.impression, date: at }),
+          deck: dk.id, spread: e.spread, variant: e.variant, question,
+          impression: (e.impression || '').trim(), cards: e.placed, reversed: rev, rounds: rs?.map(r => r.cards) ?? null, created_at: at,
+          summary: readingText({ dk, spread: s, variant: e.variant, cards: e.placed, reversed: rev, rounds: rs, question, impression: e.impression, date: at }),
         }),
       });
       dropLocal(e.key);
@@ -550,7 +587,7 @@ function renderLocal() {
   $('localBlock').hidden = !entries.length;
   entries.forEach(e => {
     const s = findSpread(e.spread);
-    const total = s.variants[e.variant].positions.length;
+    const total = s.session ? null : s.variants[e.variant].positions.length;
     const li = document.createElement('li');
     li.innerHTML = `
       <button class="local-item">
@@ -562,8 +599,8 @@ function renderLocal() {
     li.querySelector('.local-name').textContent = s.name + (s.variants.length > 1 ? ` · ${s.variants[e.variant].name}` : '');
     li.querySelector('.local-state').textContent = entryDone(e)
       ? `Not yet saved to journal · ${formatDate(e.drawnAt || e.at, { day: 'numeric', month: 'short' })}`
-      : `Unfinished, ${e.placed.length} of ${total} cards · Resume`;
-    li.querySelector('.local-question').textContent = (e.question || '').trim();
+      : `Unfinished, ${e.placed.length}${total ? ` of ${total}` : ''} card${e.placed.length === 1 && !total ? '' : 's'} · Resume`;
+    li.querySelector('.local-question').textContent = (e.question || '').trim().replace(/\n/g, ' · ');
     li.querySelector('.local-item').addEventListener('click', () => resumeLocal(e));
     li.querySelector('.journal-delete').addEventListener('click', () => {
       dropLocal(e.key);
@@ -604,7 +641,7 @@ function renderRecent() {
     a.append(mini);
     a.insertAdjacentHTML('beforeend', '<span class="recent-text"><span class="tile-name"></span><span class="tile-count"></span></span>');
     a.querySelector('.tile-name').textContent = s.name;
-    a.querySelector('.tile-count').textContent = s.variants.length > 1 ? s.variants[r.variant].name : `${s.variants[r.variant].positions.length} card${s.variants[r.variant].positions.length > 1 ? 's' : ''}`;
+    a.querySelector('.tile-count').textContent = s.session ? 'Three cards a question' : s.variants.length > 1 ? s.variants[r.variant].name : `${s.variants[r.variant].positions.length} card${s.variants[r.variant].positions.length > 1 ? 's' : ''}`;
     row.appendChild(a);
   });
 }
@@ -621,7 +658,30 @@ function showView(name) {
 // ---------- reading ----------
 
 function positions() {
-  return spread.variants[variantIndex].positions;
+  return spread.session ? sessionPositions(rounds, !finished) : spread.variants[variantIndex].positions;
+}
+
+// One row per question: its three cards, then any clarifiers after a small gap. While the reading is open,
+// the question being drawn for has one empty place more, where the next card lands.
+function sessionPositions(rs, open = false) {
+  const ps = [];
+  rs.forEach((r, ri) => {
+    const n = r.cards + (open && ri === rs.length - 1 ? 1 : 0);
+    for (let k = 0; k < n; k++) {
+      ps.push(P(k < 3 ? `Question ${ri + 1}, card ${k + 1}` : `Question ${ri + 1}, clarifier ${k - 2}`, k * 1.15 + (k < 3 ? 0 : 0.35), ri * 1.75));
+    }
+  });
+  return ps;
+}
+
+// The board of a question-by-question reading after it grew or shrank by a place.
+function growBoard() {
+  layout($('board'), positions(), true).forEach((slot, i) => {
+    if (slot.dataset.index) return;
+    slot.dataset.index = i;
+    slot.classList.add('empty');
+    slot.innerHTML = `<span class="slot-num">${i + 1}</span>`;
+  });
 }
 
 function isParadox() {
@@ -656,8 +716,9 @@ function openSpread(id, variant = 0) {
 }
 
 // Opens a finished reading from a link:
-// #r?d=<deck>&s=<spread>&v=<variant>&c=<cards>&rv=<0 or 1 per card>&q=<question>&id=<journal id>
-// `d` is left out for the Osho Zen deck, `rv` when reversals were off.
+// #r?d=<deck>&s=<spread>&v=<variant>&c=<cards>&rv=<0 or 1 per card>&g=<cards per question>&q=<question>&id=<journal id>
+// `d` is left out for the Osho Zen deck, `rv` when reversals were off, `g` but for the
+// question-by-question spread (whose `q` holds every question, one line each).
 function openSharedReading(params) {
   setDeck(DECKS[params.get('d')] ? params.get('d') : 'osho');
   const s = findSpread(params.get('s'));
@@ -665,7 +726,8 @@ function openSharedReading(params) {
   const v = Number(params.get('v') ?? 0);
   const cards = (params.get('c') || '').split('-').map(Number);
   if (!Number.isInteger(v) || v < 0 || v >= s.variants.length) return openSpread(s.id);
-  const valid = cards.length === s.variants[v].positions.length &&
+  const rs = s.session ? splitRounds((params.get('g') || '').split('-').map(Number), params.get('q')) : null;
+  const valid = (s.session ? validRounds(rs, cards, true) : cards.length === s.variants[v].positions.length) &&
     cards.every(n => Number.isInteger(n) && n >= 1 && n <= D.total) && new Set(cards).size === cards.length;
   if (!valid) return openSpread(s.id);
   const rv = params.get('rv');
@@ -673,10 +735,12 @@ function openSharedReading(params) {
   setupSpread(s, v);
   placed = cards;
   reversed = D.reversals && rv && rv.length === cards.length && /^[01]+$/.test(rv) ? [...rv].map(c => c === '1') : null;
+  rounds = rs;
+  finished = !!rs;
   deck = shuffle(allCards().filter(n => !cards.includes(n)));
   cutDone = true;
   fanMode = 'fan';
-  $('question').value = params.get('q') || '';
+  $('question').value = rs ? rs.at(-1).question : params.get('q') || '';
   $('impression').value = '';
   resetJournalState();
   localKey = null;
@@ -720,6 +784,8 @@ function newReading() {
   deck = shuffle(allCards());
   placed = [];
   reversed = null;
+  rounds = spread.session ? [{ question: $('question').value, cards: 0 }] : null;
+  finished = false;
   fanMode = 'fan';
   cutDone = false;
   resetJournalState();
@@ -766,7 +832,7 @@ function fillSlot(slot, n, animate, rev) {
 }
 
 function isDone() {
-  return placed.length >= positions().length;
+  return spread.session ? finished : placed.length >= positions().length;
 }
 
 // A finished reading drawn here that the journal does not have yet.
@@ -785,6 +851,13 @@ function statusText() {
   }
   if (fanMode === 'piles') return 'Choose one of the three packs.';
   if (isParadox() && !cutDone) return 'Shuffle for as long as you like, then cut the deck and choose a pack.';
+  if (spread.session) {
+    const q = rounds.length, have = rounds[q - 1].cards;
+    const now = have < 3
+      ? `Question ${q}, card ${have + 1} of 3.`
+      : `Question ${q} has its three cards. Draw a clarifier if they need one, or go on to the next question, or finish.`;
+    return placed.length === 0 && !cutDone ? `Write your question, then draw. ${now} Shuffle or cut first if you like.` : now;
+  }
   const next = `Card ${placed.length + 1} of ${ps.length}: ${ps[placed.length].label}`;
   return placed.length === 0 && !cutDone ? `${next}. Shuffle or cut first if you like.` : next;
 }
@@ -800,10 +873,25 @@ function update() {
   $('fan').inert = done;
   $('deckControls').hidden = done || placed.length > 0 || fanMode === 'piles' || (isParadox() && cutDone);
   renderReversalsButton();
+  // A question gets its three cards before the next question or the end.
+  $('sessionControls').hidden = !spread.session || done || flying || rounds.at(-1).cards < 3;
+  $('questionLabel').textContent = spread.session ? `Question ${rounds.length}` : 'Your question';
+  $('question').placeholder = spread.session && rounds.length > 1 ? 'The next question' : 'What would you like to look at?';
 
   const list = $('positions');
   list.replaceChildren();
+  // Where each question starts, for a heading with its words above its cards.
+  const starts = new Map();
+  if (spread.session) rounds.reduce((at, r, ri) => (starts.set(at, ri), at + r.cards), 0);
   ps.forEach((p, i) => {
+    if (starts.has(i)) {
+      const head = document.createElement('li');
+      head.className = 'round-head';
+      const ri = starts.get(i);
+      const words = (ri === rounds.length - 1 ? $('question').value : rounds[ri].question).trim();
+      head.textContent = `Question ${ri + 1}${words ? `: ${words}` : ''}`;
+      list.appendChild(head);
+    }
     const li = document.createElement('li');
     const n = placed[i];
     li.className = n ? 'filled' : i === placed.length ? 'next' : '';
@@ -972,6 +1060,7 @@ function pick(cardEl) {
   place(cardEl).then(() => {
     if (!isCurrent(g)) return;
     flying = false;
+    if (spread.session) growBoard();
     if (isDone()) {
       drawnAt = new Date().toISOString();
       rememberSpread();
@@ -990,6 +1079,7 @@ function place(cardEl) {
   play('slide');
   deck = deck.filter(c => c !== n);
   placed.push(n);
+  if (rounds) rounds[rounds.length - 1].cards++;
   // Whether reversals are in play is settled by the first card, so the reading keeps it.
   if (index === 0) reversed = D.reversals && reversals ? [] : null;
   const rev = !!reversed && randomInt(2) === 1;
@@ -1053,6 +1143,16 @@ function undo() {
   saveFailed = false;
   clearTimeout(questionTimer);
   questionTimer = null;
+  // A question asked but not yet drawn for goes first, giving back the one before it.
+  if (spread.session && !finished && rounds.length > 1 && rounds.at(-1).cards === 0) {
+    rounds.pop();
+    $('question').value = rounds.at(-1).question;
+    growBoard();
+    update();
+    return;
+  }
+  if (rounds) rounds[rounds.length - 1].cards--;
+  finished = false;
   const n = placed.pop();
   reversed?.pop();
   if (!placed.length) reversed = null;
@@ -1061,6 +1161,27 @@ function undo() {
   renderBoard();
   renderFan();
   update();
+}
+
+// ---------- question by question ----------
+
+function nextQuestion() {
+  if (!spread?.session || finished || flying || rounds.at(-1).cards < 3) return;
+  rounds.push({ question: '', cards: 0 });
+  $('question').value = '';
+  growBoard();
+  update();
+  $('question').focus();
+}
+
+function finishSession() {
+  if (!spread?.session || finished || flying || rounds.at(-1).cards < 3) return;
+  finished = true;
+  drawnAt = new Date().toISOString();
+  rememberSpread();
+  growBoard();
+  update();
+  saveReading();
 }
 
 function changeVariant() {
@@ -1084,7 +1205,8 @@ function changeVariant() {
 function shareHash() {
   const p = new URLSearchParams({ ...(D.id !== 'osho' && { d: D.id }), s: spread.id, v: variantIndex, c: placed.join('-') });
   if (reversed) p.set('rv', reversed.map(Number).join(''));
-  const q = $('question').value.trim();
+  if (rounds) p.set('g', rounds.map(r => r.cards).join('-'));
+  const q = ownWords().question;
   if (q) p.set('q', q);
   if (readingId) p.set('id', readingId);
   return `r?${p}`;
@@ -1147,7 +1269,8 @@ async function saveReading() {
     r = await api('readings', {
       method: 'POST',
       body: JSON.stringify({
-        deck: D.id, spread: spread.id, variant: variantIndex, ...words, cards: placed, reversed, summary: readingText(),
+        deck: D.id, spread: spread.id, variant: variantIndex, ...words, cards: placed, reversed,
+        rounds: rounds?.map(r => r.cards) ?? null, summary: readingText(),
         ...(drawnAt && { created_at: drawnAt }),
       }),
     });
@@ -1203,6 +1326,7 @@ function discardSaved() {
 // The question and the first impression; both are saved the same way.
 let questionTimer = null;
 function onWordsInput() {
+  if (spread?.session) rounds[rounds.length - 1].question = $('question').value;
   if (isDone()) history.replaceState(null, '', `#${shareHash()}`);
   keepLocal();
   if (!readingId || !verified) return;  // a save in progress picks the new words up when it lands
@@ -1249,12 +1373,14 @@ async function loadReading(id) {
   setReadOnly(false);
   // A link whose cards were edited by hand must not pass for the saved reading.
   if (readingDeck(r) !== D || r.spread !== spread.id || r.variant !== variantIndex || r.cards.join('-') !== placed.join('-') ||
-      JSON.stringify(r.reversed ?? null) !== JSON.stringify(reversed)) {
+      JSON.stringify(r.reversed ?? null) !== JSON.stringify(reversed) ||
+      JSON.stringify(r.rounds ?? null) !== JSON.stringify(rounds?.map(x => x.cards) ?? null)) {
     const link = readingLink(r);
     history.replaceState(null, '', link);
     return openSharedReading(new URLSearchParams(link.slice(3)));
   }
-  $('question').value = r.question;
+  if (rounds) rounds = splitRounds(r.rounds, r.question);
+  $('question').value = rounds ? rounds.at(-1).question : r.question;
   $('impression').value = r.impression || '';
   drawnAt = r.created_at;
   interpretation = r.interpretation ? { text: r.interpretation, at: r.interpreted_at } : null;
@@ -1480,6 +1606,7 @@ function renderJournalSummary(readings) {
 function readingLink(r) {
   const p = new URLSearchParams({ ...(r.deck && r.deck !== 'osho' && { d: r.deck }), s: r.spread, v: r.variant, c: r.cards.join('-') });
   if (r.reversed) p.set('rv', r.reversed.map(Number).join(''));
+  if (r.rounds) p.set('g', r.rounds.join('-'));
   if (r.question) p.set('q', r.question);
   p.set('id', r.id);
   return `#r?${p}`;
@@ -1510,7 +1637,7 @@ function renderJournalList() {
     const noteCount = (r.notes || []).length;
     li.querySelector('.journal-spread').textContent = (s ? s.name : r.spread) + (r.interpretation ? ' · interpreted' : '') +
       (noteCount ? ` · ${noteCount} note${noteCount > 1 ? 's' : ''}` : '');
-    li.querySelector('.journal-question').textContent = r.question || 'No question';
+    li.querySelector('.journal-question').textContent = r.question.replace(/\n/g, ' · ') || 'No question';
     const hit = term && !fold(r.question).includes(term) && searchable(r).find(t => fold(t).includes(term));
     if (hit) {
       li.querySelector('.journal-match').hidden = false;
@@ -1624,12 +1751,14 @@ function cardReadings(n, readings) {
   box.querySelector('button').addEventListener('click', () => openCard(n, null));
   readings.filter(r => r.cards.includes(n)).forEach(r => {
     const i = r.cards.indexOf(n);
-    const label = findSpread(r.spread)?.variants[r.variant]?.positions[i]?.label;
+    const label = r.rounds
+      ? sessionPositions(r.rounds.map(cards => ({ cards })))[i]?.label
+      : findSpread(r.spread)?.variants[r.variant]?.positions[i]?.label;
     const li = document.createElement('li');
     li.innerHTML = '<a><span class="journal-date"></span><span class="card-readings-question"></span><span class="card-readings-position"></span></a>';
     li.querySelector('a').href = readingLink(r);
     li.querySelector('.journal-date').textContent = formatDate(r.created_at, { day: 'numeric', month: 'short', year: 'numeric' });
-    li.querySelector('.card-readings-question').textContent = r.question || 'No question';
+    li.querySelector('.card-readings-question').textContent = r.question.replace(/\n/g, ' · ') || 'No question';
     li.querySelector('.card-readings-position').textContent = `Position ${i + 1}${label ? ` · ${label}` : ''}`;
     box.querySelector('ul').appendChild(li);
   });
@@ -1646,19 +1775,21 @@ function cardReadings(n, readings) {
 const BIG_SPREAD = 6;
 
 function currentReading() {
-  return { dk: D, spread, variant: variantIndex, cards: placed, reversed, ...ownWords(), date: drawnAt };
+  return { dk: D, spread, variant: variantIndex, cards: placed, reversed, rounds, ...ownWords(), date: drawnAt };
 }
 
-function readingText({ dk, spread, variant: v, cards, reversed, question = '', impression = '', date } = currentReading()) {
+function readingText({ dk, spread, variant: v, cards, reversed, rounds, question = '', impression = '', date } = currentReading()) {
   const variant = spread.variants[v];
-  const ps = variant.positions;
+  const ps = rounds ? sessionPositions(rounds) : variant.positions;
   question = question.trim();
   impression = impression.trim();
   const clean = t => t.replace(/\r\n/g, '\n').trim();
   const lines = [
     `${dk.title} reading, ${(date ? new Date(date) : new Date()).toISOString().slice(0, 10)}`,
     '',
-    `Question: ${question || '(none; read it as a general reading for here and now)'}`,
+    ...(rounds
+      ? ['Questions, in the order they were asked:', ...rounds.map((r, i) => `${i + 1}. ${r.question.replace(/\s+/g, ' ').trim() || '(none; read its cards as a general look at here and now)'}`)]
+      : [`Question: ${question || '(none; read it as a general reading for here and now)'}`]),
     ...(impression ? ['', `My first impression, written before reading the card texts: ${impression}`] : []),
     '',
     `Spread: ${spread.name}${variant.name ? ` (${variant.name})` : ''}`,
@@ -1690,7 +1821,11 @@ function readingText({ dk, spread, variant: v, cards, reversed, question = '', i
     'unclear, or you need more context about my situation to read the cards well, ask me first: ' +
     'a few short questions at a time, and wait for my answers before interpreting. ' +
     (impression ? 'Start from my first impression: it is what I saw in the cards before any explanation. ' : '') +
-    (ps.length >= BIG_SPREAD
+    (rounds
+      ? 'Answer the questions in the order they were asked, each from its own cards: its first three, ' +
+        'then any clarifier, which was drawn to clarify or ground them. Keep each answer short, and say ' +
+        'where a later question picks up an earlier one. '
+      : ps.length >= BIG_SPREAD
       ? 'This is a big spread, so rather than an essay on every card, give a short synthesis in the light ' +
         'of the positions and the texts above, name one or two tensions between the cards, and end with a ' +
         'question back to me. '
@@ -1879,6 +2014,7 @@ function route(initial = false) {
     const params = new URLSearchParams(location.hash.slice(3));
     const e = !params.get('id') && kept.find(x => entryDeck(x).id === (params.get('d') || 'osho') && x.spread === params.get('s') &&
       (x.reversed ? x.reversed.map(Number).join('') : null) === params.get('rv') &&
+      (x.rounds ? x.rounds.map(r => r.cards).join('-') : null) === params.get('g') &&
       String(x.variant) === (params.get('v') ?? '0') && x.placed.join('-') === params.get('c'));
     return e ? resumeLocal(e) : openSharedReading(params);
   }
@@ -1898,6 +2034,8 @@ $('coinButton').addEventListener('click', () => { $('coinDialog').showModal(); f
 $('flipAgain').addEventListener('click', flipCoin);
 $('soundButton').addEventListener('click', toggleSound);
 $('reversalsButton').addEventListener('click', toggleReversals);
+$('nextQuestionButton').addEventListener('click', nextQuestion);
+$('finishButton').addEventListener('click', finishSession);
 document.querySelectorAll('#deckSwitch button').forEach(b => b.addEventListener('click', () => onDeckSwitch(b.dataset.deck)));
 $('copyButton').addEventListener('click', () => copyText(readingText(), 'Reading copied.'));
 $('linkButton').addEventListener('click', () => copyText(location.href, 'Link copied.'));

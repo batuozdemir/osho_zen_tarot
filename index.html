@@ -84,7 +84,7 @@
             <select id="variantSelect"></select>
           </label>
           <label class="field">
-            <span>Your question</span>
+            <span id="questionLabel">Your question</span>
             <textarea id="question" rows="3" placeholder="What would you like to look at?"></textarea>
           </label>
         </div>
@@ -96,6 +96,10 @@
             <button class="ghost" id="shuffleButton">Shuffle</button>
             <button class="ghost" id="cutButton">Cut the deck</button>
             <button class="ghost reversals-button" id="reversalsButton" aria-pressed="false" hidden>Reversed cards: off</button>
+          </div>
+          <div class="deck-controls" id="sessionControls" hidden>
+            <button class="ghost" id="nextQuestionButton">Next question</button>
+            <button class="ghost" id="finishButton">Finish</button>
           </div>
           <div class="fan" id="fan" aria-label="The deck, face down"></div>
         </div>
