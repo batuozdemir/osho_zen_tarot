@@ -635,6 +635,8 @@ dialog::backdrop { background: rgba(5, 4, 8, 0.75); backdrop-filter: blur(3px); 
 /* question by question: each question heads its cards in the positions list */
 .positions .round-head { color: var(--gold); font-size: 16px; margin-top: 10px; list-style: none; overflow-wrap: anywhere; }
 .positions .round-head:first-child { margin-top: 0; }
+.positions .round-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.positions .round-head .ghost { flex: none; padding: 2px 12px; font-size: 14px; }
 .fan-card.leaving { opacity: 0; transition: opacity 0.4s, transform 0.35s ease; pointer-events: none; }
 
 /* ---------- saved reading and interpretation ---------- */

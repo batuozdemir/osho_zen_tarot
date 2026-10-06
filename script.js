@@ -663,13 +663,14 @@ function positions() {
 }
 
 // One row per question: its three cards, then any clarifiers after a small gap. While the reading is open,
-// the question being drawn for has one empty place more, where the next card lands.
+// the question being drawn for has one empty place more, where the next card lands. A question copied on
+// its own carries its number in the sitting as `n`.
 function sessionPositions(rs, open = false) {
   const ps = [];
   rs.forEach((r, ri) => {
-    const n = r.cards + (open && ri === rs.length - 1 ? 1 : 0);
+    const n = r.cards + (open && ri === rs.length - 1 ? 1 : 0), q = r.n ?? ri + 1;
     for (let k = 0; k < n; k++) {
-      ps.push(P(k < 3 ? `Question ${ri + 1}, card ${k + 1}` : `Question ${ri + 1}, clarifier ${k - 2}`, k * 1.15 + (k < 3 ? 0 : 0.35), ri * 1.75));
+      ps.push(P(k < 3 ? `Question ${q}, card ${k + 1}` : `Question ${q}, clarifier ${k - 2}`, k * 1.15 + (k < 3 ? 0 : 0.35), ri * 1.75));
     }
   });
   return ps;
@@ -874,8 +875,11 @@ function update() {
   $('fan').inert = done;
   $('deckControls').hidden = done || placed.length > 0 || fanMode === 'piles' || (isParadox() && cutDone);
   renderReversalsButton();
-  // A question gets its three cards before the next question or the end.
-  $('sessionControls').hidden = !spread.session || done || flying || rounds.at(-1).cards < 3;
+  // A question gets its three cards before the next question or the end. A finished sitting
+  // can be taken up again while its cards could still be undone.
+  $('sessionControls').hidden = !spread.session || flying || (done ? cardsLocked() : rounds.at(-1).cards < 3);
+  $('nextQuestionButton').hidden = $('finishButton').hidden = done;
+  $('continueButton').hidden = !done;
   $('questionLabel').textContent = spread.session ? `Question ${rounds.length}` : 'Your question';
   $('question').placeholder = spread.session && rounds.length > 1 ? 'The next question' : 'What would you like to look at?';
 
@@ -890,7 +894,11 @@ function update() {
       head.className = 'round-head';
       const ri = starts.get(i);
       const words = (ri === rounds.length - 1 ? $('question').value : rounds[ri].question).trim();
-      head.textContent = `Question ${ri + 1}${words ? `: ${words}` : ''}`;
+      head.innerHTML = '<span></span><button class="ghost">Copy</button>';
+      head.firstChild.textContent = `Question ${ri + 1}${words ? `: ${words}` : ''}`;
+      head.lastChild.hidden = rounds[ri].cards < 3;
+      head.lastChild.setAttribute('aria-label', `Copy question ${ri + 1}`);
+      head.lastChild.addEventListener('click', () => copyText(sittingText(ri, ri + 1, true), `Question ${ri + 1} copied.`));
       list.appendChild(head);
     }
     const li = document.createElement('li');
@@ -905,10 +913,9 @@ function update() {
   });
 
   $('impressionField').hidden = !done;
-  $('copyButton').disabled = !done;
+  $('copyButton').disabled = !done && !(spread.session && completeRounds() > 0);
   $('linkButton').disabled = !done;
-  $('undoButton').disabled = placed.length === 0 || flying || !!interpretation || notes.length > 0 || addingNote ||
-    (readingId && !ownReading) || (isParadox() && placed.length <= 2);
+  $('undoButton').disabled = placed.length === 0 || flying || cardsLocked() || (isParadox() && placed.length <= 2);
   history.replaceState(null, '', done ? `#${shareHash()}` : spreadHash());
   keepLocal();
   renderSaved();
@@ -1133,9 +1140,11 @@ function place(cardEl) {
   });
 }
 
-function undo() {
-  // Once Claude or Batu has written about the saved reading, its cards are final.
-  if (flying || placed.length === 0 || interpretation || notes.length || addingNote || (readingId && !ownReading)) return;
+// Once Claude or Batu has written about the saved reading, its cards are final.
+const cardsLocked = () => !!interpretation || notes.length > 0 || addingNote || (!!readingId && !ownReading);
+
+// The cards are about to change: the saved copy, or the save in flight, goes.
+function unsave() {
   if (readingId) discardSaved();
   if (pendingSave) pendingSave.cancelled = true;
   pendingSave = null;
@@ -1144,6 +1153,11 @@ function undo() {
   saveFailed = false;
   clearTimeout(questionTimer);
   questionTimer = null;
+}
+
+function undo() {
+  if (flying || placed.length === 0 || cardsLocked()) return;
+  unsave();
   // A question asked but not yet drawn for goes first, giving back the one before it.
   if (spread.session && !finished && rounds.length > 1 && rounds.at(-1).cards === 0) {
     rounds.pop();
@@ -1183,6 +1197,17 @@ function finishSession() {
   growBoard();
   update();
   saveReading();
+}
+
+// A finished sitting opened again, for a clarifier or a next question; it is saved again
+// when it is finished again.
+function continueSession() {
+  if (!spread?.session || !finished || flying || cardsLocked()) return;
+  unsave();
+  finished = false;
+  drawnAt = null;
+  growBoard();
+  update();
 }
 
 function changeVariant() {
@@ -1837,41 +1862,40 @@ function currentReading() {
   return { dk: D, spread, variant: variantIndex, cards: placed, reversed, rounds, ...ownWords(), date: drawnAt };
 }
 
-function readingText({ dk, spread, variant: v, cards, reversed, rounds, question = '', impression = '', date } = currentReading()) {
+// `open`: a question-by-question reading copied before it was finished; `more`: its last
+// question can still get a clarifier.
+function readingText({ dk, spread, variant: v, cards, reversed, rounds, question = '', impression = '', date, open = false, more = false } = currentReading()) {
   const variant = spread.variants[v];
   const ps = rounds ? sessionPositions(rounds) : variant.positions;
   question = question.trim();
   impression = impression.trim();
-  const clean = t => t.replace(/\r\n/g, '\n').trim();
   const lines = [
     `${dk.title} reading, ${(date ? new Date(date) : new Date()).toISOString().slice(0, 10)}`,
     '',
     ...(rounds
-      ? ['Questions, in the order they were asked:', ...rounds.map((r, i) => `${i + 1}. ${r.question.replace(/\s+/g, ' ').trim() || '(none; read its cards as a general look at here and now)'}`)]
+      ? ['Questions, in the order they were asked:', ...rounds.map((r, i) => `${r.n ?? i + 1}. ${r.question.replace(/\s+/g, ' ').trim() || '(none; read its cards as a general look at here and now)'}`)]
       : [`Question: ${question || '(none; read it as a general reading for here and now)'}`]),
     ...(impression ? ['', `My first impression, written before reading the card texts: ${impression}`] : []),
     '',
     `Spread: ${spread.name}${variant.name ? ` (${variant.name})` : ''}`,
     spread.intro,
     '',
+    'How this works: I draw the cards myself on a tarot site and paste them to you here; you cannot draw them. ' +
+    (!rounds
+      ? 'The spread is complete and no more cards can be drawn for it, so read it from the cards below.'
+      : !open
+      ? 'The sitting is finished, so no more cards will be drawn: read it from the cards below.'
+      : 'The sitting is still open. ' +
+        (more ? "If the last question's cards need it, ask me to draw a clarifier: one more card for that question. " : '') +
+        `I may ${more ? 'also ' : ''}go on to a next question, with three cards from what is left of the same deck. I will paste each ` +
+        'new card or question briefly, just the question and its cards with their texts, without repeating these ' +
+        'notes: read it the same way, in the light of what came before.'),
+    '',
     dk.note,
     ...(reversed ? ['', 'Reversed cards were in play: each card came up upright or reversed at random, and the reversed ones are marked.'] : []),
     '',
-    'Cards, by position:',
-    ...ps.map((p, i) => `${i + 1}. ${p.label}: ${cardName(cards[i], dk)}${reversed?.[i] ? ', reversed' : ''} (${cardRank(cards[i], dk)})`),
+    ...cardLines(dk, ps, cards, reversed),
   ];
-  ps.forEach((p, i) => {
-    const n = cards[i];
-    lines.push(
-      '',
-      '---',
-      '',
-      `${i + 1}. ${p.label}`,
-      `${cardName(n, dk)}${reversed?.[i] ? ', reversed' : ''} (${cardRank(n, dk)})`,
-      '',
-      ...dk.about(n, !!reversed?.[i]).map(clean),
-    );
-  });
   lines.push(
     '',
     '---',
@@ -1895,6 +1919,48 @@ function readingText({ dk, spread, variant: v, cards, reversed, rounds, question
     'part of the answer. Reply in the language of the question.',
   );
   return lines.join('\n');
+}
+
+// The cards by position, then each card's full text.
+function cardLines(dk, ps, cards, reversed) {
+  const clean = t => t.replace(/\r\n/g, '\n').trim();
+  const card = i => `${cardName(cards[i], dk)}${reversed?.[i] ? ', reversed' : ''} (${cardRank(cards[i], dk)})`;
+  return [
+    'Cards, by position:',
+    ...ps.map((p, i) => `${i + 1}. ${p.label}: ${card(i)}`),
+    ...ps.flatMap((p, i) => ['', '---', '', `${i + 1}. ${p.label}`, card(i), '', ...dk.about(cards[i], !!reversed?.[i]).map(clean)]),
+  ];
+}
+
+// Part of a question-by-question reading as its own text, questions `first` up to `last`;
+// it can be copied while the sitting is still open, each question once it has its three
+// cards. "Copy reading" starts the conversation and explains everything; a `brief` copy of
+// one question goes into that same conversation, so it carries only the question and its cards.
+function sittingText(first, last, brief = false) {
+  const at = rounds.slice(0, first).reduce((t, r) => t + r.cards, 0);
+  const rs = rounds.slice(first, last).map((r, i) => ({ ...r, n: first + i + 1 }));
+  const count = rs.reduce((t, r) => t + r.cards, 0);
+  const cards = placed.slice(at, at + count), rev = reversed?.slice(at, at + count) ?? null;
+  if (!brief) {
+    return readingText({ ...currentReading(), rounds: rs, cards, reversed: rev, open: !finished, more: !finished && last === rounds.length });
+  }
+  return [
+    ...rs.map(r => `Question ${r.n}: ${r.question.replace(/\s+/g, ' ').trim() || '(none; read its cards as a general look at here and now)'}`),
+    '',
+    ...cardLines(D, sessionPositions(rs), cards, rev),
+    '',
+    '---',
+    '',
+    'The same sitting: read this question the same way, from its own cards, in the light of what came before.',
+  ].join('\n');
+}
+
+// The questions that have their three cards; all of them but a next one just asked.
+const completeRounds = () => rounds.length - (rounds.at(-1).cards < 3 ? 1 : 0);
+
+function copyReading() {
+  if (spread.session && !finished) return copyText(sittingText(0, completeRounds()), 'Reading so far copied.');
+  copyText(readingText(), 'Reading copied.');
 }
 
 function hideToastAction() {
@@ -2098,8 +2164,9 @@ $('soundButton').addEventListener('click', toggleSound);
 $('reversalsButton').addEventListener('click', toggleReversals);
 $('nextQuestionButton').addEventListener('click', nextQuestion);
 $('finishButton').addEventListener('click', finishSession);
+$('continueButton').addEventListener('click', continueSession);
 document.querySelectorAll('#deckSwitch button').forEach(b => b.addEventListener('click', () => onDeckSwitch(b.dataset.deck)));
-$('copyButton').addEventListener('click', () => copyText(readingText(), 'Reading copied.'));
+$('copyButton').addEventListener('click', copyReading);
 $('linkButton').addEventListener('click', () => copyText(location.href, 'Link copied.'));
 $('undoButton').addEventListener('click', undo);
 $('resetButton').addEventListener('click', () => {

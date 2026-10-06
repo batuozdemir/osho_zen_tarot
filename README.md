@@ -8,7 +8,11 @@ specific to the Osho guidebook (single card, three cards, Celtic Cross in Waite'
 horseshoe, decision), plus "Question by Question": not a layout but a sitting, the way a
 reader works. Each question in turn gets three cards, then optional clarifiers (one more
 card that sheds light on the three, often drawn when they are all Major Arcana), all from
-the same deck without reshuffling, until the reading is finished by hand. Rider-Waite readings can use reversed cards: a "Reversed cards"
+the same deck without reshuffling, until the reading is finished by hand. It can be copied before it
+is finished: "Copy reading" gives the questions so far with everything an outside assistant needs,
+including how the sitting works (it may ask for a clarifier for the last question), and each
+question's own "Copy" gives just that question and its cards, to paste into the same conversation.
+"Continue the sitting" takes a finished one up again while it could still be undone. Rider-Waite readings can use reversed cards: a "Reversed cards"
 button next to Shuffle turns them on before the first card, and each card then comes up
 upright or reversed at random.
 
