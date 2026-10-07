@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS readings (
     impression      TEXT NOT NULL DEFAULT '',  -- Batu's first impression, written before the card texts
     deck            TEXT NOT NULL DEFAULT 'osho',  -- 'osho' (Osho Zen) or 'rws' (Rider-Waite); each has its own journal
     reversed        TEXT NOT NULL DEFAULT '',  -- "0,1,0" per card when reversals were in play, else empty
-    rounds          TEXT NOT NULL DEFAULT ''   -- question by question: cards per question, "3,4,3"; its questions are the lines of `question`
+    rounds          TEXT NOT NULL DEFAULT '',  -- question by question: cards per question, "3,4,3"; its questions are the lines of `question`
+    reshuffled      TEXT NOT NULL DEFAULT ''   -- question by question: the questions (from 0) before which the deck was made whole again, "2"
 );
 -- Dated notes written when coming back to a reading later.
 CREATE TABLE IF NOT EXISTS notes (
@@ -84,6 +85,8 @@ with db() as conn:
         conn.execute("ALTER TABLE readings ADD COLUMN reversed TEXT NOT NULL DEFAULT ''")
     if "rounds" not in columns:
         conn.execute("ALTER TABLE readings ADD COLUMN rounds TEXT NOT NULL DEFAULT ''")
+    if "reshuffled" not in columns:
+        conn.execute("ALTER TABLE readings ADD COLUMN reshuffled TEXT NOT NULL DEFAULT ''")
 
 
 def purge(conn: sqlite3.Connection) -> None:
@@ -108,6 +111,7 @@ def row_to_dict(row: sqlite3.Row, notes: list[dict], earlier: list[dict]) -> dic
     d["cards"] = [int(c) for c in d["cards"].split(",") if c]
     d["reversed"] = [c == "1" for c in d["reversed"].split(",")] if d["reversed"] else None
     d["rounds"] = [int(c) for c in d["rounds"].split(",")] if d["rounds"] else None
+    d["reshuffled"] = [int(c) for c in d["reshuffled"].split(",")] if d["reshuffled"] else []
     d.pop("deleted_at", None)
     d["notes"] = notes
     d["earlier"] = earlier
@@ -153,6 +157,10 @@ def get_row(conn: sqlite3.Connection, reading_id: str, deleted: bool = False) ->
 
 # Cards per deck; card numbers run from 1 to this.
 DECK_SIZE = {"osho": 79, "rws": 78}
+# A sitting whose deck is made whole again can outgrow one deck; the summary carries every
+# card's full text.
+MAX_CARDS = 300
+MAX_SUMMARY = 2_000_000
 
 
 class NewReading(BaseModel):
@@ -161,22 +169,50 @@ class NewReading(BaseModel):
     variant: int = Field(default=0, ge=0, le=64)
     question: str = Field(default="", max_length=4000)
     impression: str = Field(default="", max_length=4000)
-    cards: list[int] = Field(min_length=1, max_length=79)
+    cards: list[int] = Field(min_length=1, max_length=MAX_CARDS)
     # One flag per card when reversals were in play (Rider-Waite only); left out otherwise.
     reversed: list[bool] | None = None
     # Question by question: how many cards each question got, in order; left out otherwise.
-    rounds: list[int] | None = Field(default=None, max_length=79)
-    summary: str = Field(default="", max_length=200_000)
+    rounds: list[int] | None = Field(default=None, max_length=MAX_CARDS)
+    # Question by question: the questions before which the deck was made whole again, so a
+    # card may come up again in a later question.
+    reshuffled: list[int] = Field(default=[], max_length=MAX_CARDS)
+    summary: str = Field(default="", max_length=MAX_SUMMARY)
     # When the spread was completed; the page sends it so that a reading kept on the device
     # while the journal was out of reach is saved under the day it was drawn.
     created_at: datetime | None = None
 
 
 class Edit(BaseModel):
-    """The parts of a reading Batu writes himself; a field left out stays as it is."""
+    """The parts of a reading Batu writes himself, and its cards when they changed after it
+    was saved; a field left out stays as it is. `cards` comes with `reversed`, `rounds`,
+    `reshuffled` and `summary` as they now are, and with `base`: the cards the change starts
+    from, which must still be the saved ones."""
     question: str | None = Field(default=None, max_length=4000)
     impression: str | None = Field(default=None, max_length=4000)
-    summary: str | None = Field(default=None, max_length=200_000)
+    summary: str | None = Field(default=None, max_length=MAX_SUMMARY)
+    cards: list[int] | None = Field(default=None, min_length=1, max_length=MAX_CARDS)
+    reversed: list[bool] | None = None
+    rounds: list[int] | None = Field(default=None, max_length=MAX_CARDS)
+    reshuffled: list[int] = Field(default=[], max_length=MAX_CARDS)
+    base: list[int] | None = Field(default=None, max_length=MAX_CARDS)
+
+
+def check_cards(deck: str, cards: list[int], reversed_: list[bool] | None, rounds: list[int] | None, reshuffled: list[int]) -> None:
+    """Cards are distinct, except across a question-by-question reading's reshuffles."""
+    size = DECK_SIZE[deck]
+    if any(not 1 <= c <= size for c in cards):
+        raise HTTPException(422, f"cards must be numbers from 1 to {size}")
+    if reversed_ is not None and (deck != "rws" or len(reversed_) != len(cards)):
+        raise HTTPException(422, "reversed needs the Rider-Waite deck and one flag per card")
+    if rounds is not None and (any(n < 1 for n in rounds) or sum(rounds) != len(cards)):
+        raise HTTPException(422, "rounds must be positive card counts adding up to the cards")
+    if reshuffled and (rounds is None or any(not 0 < q < len(rounds) for q in reshuffled)):
+        raise HTTPException(422, "reshuffled must name questions after the first")
+    # Between reshuffles the cards come from one deck, so none can repeat there.
+    starts = [0] + [sum(rounds[:q]) for q in sorted(set(reshuffled))] + [len(cards)] if rounds else [0, len(cards)]
+    if any(len(set(cards[a:b])) != b - a for a, b in zip(starts, starts[1:])):
+        raise HTTPException(422, "cards must be distinct between reshuffles")
 
 
 class Note(BaseModel):
@@ -269,25 +305,29 @@ def get_reading(reading_id: str) -> dict:
         return get_row(conn, reading_id)
 
 
+def card_columns(cards: list[int], reversed_: list[bool] | None, rounds: list[int] | None, reshuffled: list[int]) -> dict:
+    return {
+        "cards": ",".join(str(c) for c in cards),
+        "reversed": ",".join("1" if r else "0" for r in reversed_) if reversed_ is not None else "",
+        "rounds": ",".join(str(n) for n in rounds) if rounds is not None else "",
+        "reshuffled": ",".join(str(q) for q in sorted(set(reshuffled))),
+    }
+
+
 @app.post("/api/readings", status_code=201)
 def create_reading(body: NewReading) -> dict:
-    size = DECK_SIZE[body.deck]
-    if any(not 1 <= c <= size for c in body.cards) or len(set(body.cards)) != len(body.cards):
-        raise HTTPException(422, f"cards must be distinct numbers from 1 to {size}")
-    if body.reversed is not None and (body.deck != "rws" or len(body.reversed) != len(body.cards)):
-        raise HTTPException(422, "reversed needs the Rider-Waite deck and one flag per card")
-    if body.rounds is not None and (any(n < 1 for n in body.rounds) or sum(body.rounds) != len(body.cards)):
-        raise HTTPException(422, "rounds must be positive card counts adding up to the cards")
+    check_cards(body.deck, body.cards, body.reversed, body.rounds, body.reshuffled)
     created = stamp(body.created_at)
-    reading_id = f"{created[:10]}-{secrets.token_hex(3)}"
-    reversed_ = ",".join("1" if r else "0" for r in body.reversed) if body.reversed is not None else ""
-    rounds = ",".join(str(n) for n in body.rounds) if body.rounds is not None else ""
+    # Filed under the day where it was drawn: the page sends its local offset.
+    day = body.created_at.date().isoformat() if body.created_at else created[:10]
+    reading_id = f"{day}-{secrets.token_hex(3)}"
+    c = card_columns(body.cards, body.reversed, body.rounds, body.reshuffled)
     with db() as conn:
         conn.execute(
-            "INSERT INTO readings (id, created_at, deck, spread, variant, question, impression, cards, reversed, rounds, summary)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO readings (id, created_at, deck, spread, variant, question, impression, cards, reversed, rounds, reshuffled, summary)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (reading_id, created, body.deck, body.spread, body.variant, body.question, body.impression,
-             ",".join(str(c) for c in body.cards), reversed_, rounds, body.summary),
+             c["cards"], c["reversed"], c["rounds"], c["reshuffled"], body.summary),
         )
         return get_row(conn, reading_id)
 
@@ -296,7 +336,22 @@ def create_reading(body: NewReading) -> dict:
 @app.put("/api/readings/{reading_id}/question")  # the earlier name, for a page still open from before
 def edit_reading(reading_id: str, body: Edit) -> dict:
     with db() as conn:
-        get_row(conn, reading_id)
+        row = get_row(conn, reading_id)
+        if body.cards is not None:
+            missing = {"reversed", "rounds", "reshuffled", "summary", "base"} - body.model_fields_set
+            if missing:
+                raise HTTPException(422, f"cards come with {', '.join(sorted(missing))}")
+            if row["spread"] == "session" and (body.rounds is None or any(n < 3 for n in body.rounds)):
+                raise HTTPException(422, "a question-by-question reading needs rounds of three cards or more")
+            check_cards(row["deck"], body.cards, body.reversed, body.rounds, body.reshuffled)
+            # Changed meanwhile in another tab or on another device: that change is not overwritten.
+            if body.base != row["cards"]:
+                raise HTTPException(409, "the reading's cards changed since this change began")
+            c = card_columns(body.cards, body.reversed, body.rounds, body.reshuffled)
+            conn.execute(
+                "UPDATE readings SET cards = ?, reversed = ?, rounds = ?, reshuffled = ? WHERE id = ?",
+                (c["cards"], c["reversed"], c["rounds"], c["reshuffled"], reading_id),
+            )
         for field in ("question", "impression", "summary"):
             value = getattr(body, field)
             if value is not None:

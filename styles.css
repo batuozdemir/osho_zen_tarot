@@ -360,7 +360,7 @@ main {
 
 .flyer {
   position: fixed;
-  z-index: 50;
+  z-index: 150;
   pointer-events: none;
   transform-origin: 50% 50%;
   transition: transform 0.65s cubic-bezier(0.4, 0.1, 0.2, 1);
@@ -637,6 +637,8 @@ dialog::backdrop { background: rgba(5, 4, 8, 0.75); backdrop-filter: blur(3px); 
 .positions .round-head:first-child { margin-top: 0; }
 .positions .round-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .positions .round-head .ghost { flex: none; padding: 2px 12px; font-size: 14px; }
+.round-tag { position: absolute; z-index: 100; display: flex; align-items: center; gap: 10px; color: var(--gold); font-size: clamp(12px, 1.6vw, 15px); white-space: nowrap; }
+.round-tag .ghost { padding: 1px 10px; font-size: inherit; }
 .fan-card.leaving { opacity: 0; transition: opacity 0.4s, transform 0.35s ease; pointer-events: none; }
 
 /* ---------- saved reading and interpretation ---------- */
@@ -882,6 +884,9 @@ input[type="search"]:focus { border-color: var(--gold); outline: none; }
   .card-detail { grid-template-columns: 1fr; overflow-y: auto; }
   .card-detail img { height: auto; max-height: 55vh; }
   .card-detail-text { overflow: visible; padding: 20px; }
+  /* While drawing, the deck stays at the bottom of the screen, so the question above and the
+     deck below can both be reached without scrolling back and forth. */
+  .fan:not(.closed) { position: sticky; bottom: 0; z-index: 120; background: linear-gradient(transparent, #121017 45%); }
 }
 
 @media (max-width: 680px) {
@@ -898,7 +903,13 @@ input[type="search"]:focus { border-color: var(--gold); outline: none; }
   .daily { grid-template-columns: 84px minmax(0, 1fr); gap: 14px; padding: 14px; }
   .daily-text h2 { font-size: 22px; }
   .daily-excerpt { -webkit-line-clamp: 2; }
-  .topbar nav { flex-wrap: wrap; }
+  .topbar { gap: 8px; padding-top: 10px; padding-bottom: 10px; }
+  .brand { font-size: 16px; letter-spacing: 0.04em; }
+  .brand-row { gap: 10px; flex-wrap: nowrap; width: 100%; justify-content: space-between; }
+  .deck-switch button { padding: 3px 10px; font-size: 14px; }
+  .topbar nav { width: 100%; gap: 6px; overflow-x: auto; }
+  .topbar .ghost, .nav-link { padding: 5px 11px; font-size: 15px; white-space: nowrap; }
+  .sound-button span { display: none; }
   .spread-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .spread-tile { padding: 12px; }
   .mini-board { height: 90px; }

@@ -274,7 +274,7 @@ const spreads = [
   // positions as the reading goes; the positions here only draw the tile.
   {
     id: 'session',
-    decks: ['rws'],
+    decks: BOTH,
     session: true,
     hint: ['Question after question from one deck: three cards each, a clarifier when they need one, then the next question.', 'Use it for a conversation with the cards, the way a reader works across a sitting.'],
     name: 'Question by Question',
