@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -42,7 +42,12 @@ CREATE TABLE IF NOT EXISTS readings (
     deck            TEXT NOT NULL DEFAULT 'osho',  -- 'osho' (Osho Zen) or 'rws' (Rider-Waite); each has its own journal
     reversed        TEXT NOT NULL DEFAULT '',  -- "0,1,0" per card when reversals were in play, else empty
     rounds          TEXT NOT NULL DEFAULT '',  -- question by question: cards per question, "3,4,3"; its questions are the lines of `question`
-    reshuffled      TEXT NOT NULL DEFAULT ''   -- question by question: the questions (from 0) before which the deck was made whole again, "2"
+    reshuffled      TEXT NOT NULL DEFAULT '',  -- question by question: the questions (from 0) before which the deck was made whole again, "2"
+    options         TEXT NOT NULL DEFAULT '',  -- names Batu gave the spread's options ("Option 1", ...), one per line
+    clarify         TEXT NOT NULL DEFAULT '',  -- what a clarifier was drawn to clarify, JSON {card index: text}
+    takeaway        TEXT NOT NULL DEFAULT '',  -- what Batu is taking from the reading
+    revisit_on      TEXT NOT NULL DEFAULT '',  -- the local day he wants to come back to it, YYYY-MM-DD
+    interpreted_by  TEXT NOT NULL DEFAULT 'claude'  -- 'claude', or 'outside': pasted in from another chat
 );
 -- Dated notes written when coming back to a reading later.
 CREATE TABLE IF NOT EXISTS notes (
@@ -57,7 +62,8 @@ CREATE TABLE IF NOT EXISTS earlier_interpretations (
     id              INTEGER PRIMARY KEY,
     reading_id      TEXT NOT NULL REFERENCES readings(id) ON DELETE CASCADE,
     text            TEXT NOT NULL,
-    interpreted_at  TEXT NOT NULL
+    interpreted_at  TEXT NOT NULL,
+    interpreted_by  TEXT NOT NULL DEFAULT 'claude'
 );
 """
 
@@ -85,8 +91,12 @@ with db() as conn:
         conn.execute("ALTER TABLE readings ADD COLUMN reversed TEXT NOT NULL DEFAULT ''")
     if "rounds" not in columns:
         conn.execute("ALTER TABLE readings ADD COLUMN rounds TEXT NOT NULL DEFAULT ''")
-    if "reshuffled" not in columns:
-        conn.execute("ALTER TABLE readings ADD COLUMN reshuffled TEXT NOT NULL DEFAULT ''")
+    for name, default in (("reshuffled", "''"), ("options", "''"), ("clarify", "''"), ("takeaway", "''"),
+                          ("revisit_on", "''"), ("interpreted_by", "'claude'")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE readings ADD COLUMN {name} TEXT NOT NULL DEFAULT {default}")
+    if "interpreted_by" not in {r["name"] for r in conn.execute("PRAGMA table_info(earlier_interpretations)")}:
+        conn.execute("ALTER TABLE earlier_interpretations ADD COLUMN interpreted_by TEXT NOT NULL DEFAULT 'claude'")
 
 
 def purge(conn: sqlite3.Connection) -> None:
@@ -112,6 +122,8 @@ def row_to_dict(row: sqlite3.Row, notes: list[dict], earlier: list[dict]) -> dic
     d["reversed"] = [c == "1" for c in d["reversed"].split(",")] if d["reversed"] else None
     d["rounds"] = [int(c) for c in d["rounds"].split(",")] if d["rounds"] else None
     d["reshuffled"] = [int(c) for c in d["reshuffled"].split(",")] if d["reshuffled"] else []
+    d["options"] = d["options"].split("\n") if d["options"] else []
+    d["clarify"] = json.loads(d["clarify"]) if d["clarify"] else {}
     d.pop("deleted_at", None)
     d["notes"] = notes
     d["earlier"] = earlier
@@ -134,7 +146,7 @@ def earlier_by_reading(conn: sqlite3.Connection, ids: list[str]) -> dict[str, li
     for r in conn.execute(
         f"SELECT * FROM earlier_interpretations WHERE reading_id IN ({marks}) ORDER BY interpreted_at DESC, id DESC", ids
     ):
-        out[r["reading_id"]].append({"text": r["text"], "interpreted_at": r["interpreted_at"]})
+        out[r["reading_id"]].append({"text": r["text"], "interpreted_at": r["interpreted_at"], "interpreted_by": r["interpreted_by"]})
     return out
 
 
@@ -178,14 +190,19 @@ class NewReading(BaseModel):
     # card may come up again in a later question.
     reshuffled: list[int] = Field(default=[], max_length=MAX_CARDS)
     summary: str = Field(default="", max_length=MAX_SUMMARY)
+    # Names Batu gave the spread's options, in order; and what clarifiers were drawn to
+    # clarify, by card index.
+    options: list[Annotated[str, Field(max_length=200)]] = Field(default=[], max_length=4)
+    clarify: dict[int, Annotated[str, Field(max_length=1000)]] = Field(default={}, max_length=MAX_CARDS)
     # When the spread was completed; the page sends it so that a reading kept on the device
     # while the journal was out of reach is saved under the day it was drawn.
     created_at: datetime | None = None
 
 
 class Edit(BaseModel):
-    """The parts of a reading Batu writes himself, and its cards when they changed after it
-    was saved; a field left out stays as it is. `cards` comes with `reversed`, `rounds`,
+    """The parts of a reading Batu writes himself (his words, option names, takeaway and
+    revisit day), and its cards when they changed after it was saved; a field left out stays
+    as it is. `cards` comes with `reversed`, `rounds`,
     `reshuffled` and `summary` as they now are, and with `base`: the cards the change starts
     from, which must still be the saved ones."""
     question: str | None = Field(default=None, max_length=4000)
@@ -196,6 +213,11 @@ class Edit(BaseModel):
     rounds: list[int] | None = Field(default=None, max_length=MAX_CARDS)
     reshuffled: list[int] = Field(default=[], max_length=MAX_CARDS)
     base: list[int] | None = Field(default=None, max_length=MAX_CARDS)
+    options: list[Annotated[str, Field(max_length=200)]] | None = Field(default=None, max_length=4)
+    clarify: dict[int, Annotated[str, Field(max_length=1000)]] | None = Field(default=None, max_length=MAX_CARDS)
+    takeaway: str | None = Field(default=None, max_length=4000)
+    # A local day, YYYY-MM-DD, or empty for none.
+    revisit_on: str | None = Field(default=None, pattern=r"^(\d{4}-\d{2}-\d{2})?$")
 
 
 def check_cards(deck: str, cards: list[int], reversed_: list[bool] | None, rounds: list[int] | None, reshuffled: list[int]) -> None:
@@ -224,6 +246,8 @@ class Note(BaseModel):
 
 class Interpretation(BaseModel):
     text: str = Field(min_length=1, max_length=100_000)
+    # 'outside': an interpretation from another chat that Batu pasted in to keep.
+    by: Literal["claude", "outside"] = "claude"
 
 
 def stamp(t: datetime | None) -> str:
@@ -288,13 +312,15 @@ def recommend(body: Recommend) -> dict:
 
 
 @app.get("/api/readings")
-def list_readings(limit: int | None = None) -> list[dict]:
-    """All readings, newest first; `limit` caps the count when only the latest are needed."""
+def list_readings(limit: int | None = None, revisit_by: str | None = None) -> list[dict]:
+    """All readings, newest first; `limit` caps the count when only the latest are needed, and
+    `revisit_by` (YYYY-MM-DD) keeps those Batu wanted to come back to by that day."""
+    due = "AND revisit_on != '' AND revisit_on <= ?" if revisit_by else ""
     with db() as conn:
         purge(conn)
         rows = conn.execute(
-            "SELECT * FROM readings WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ?",
-            (limit if limit and limit > 0 else -1,),
+            f"SELECT * FROM readings WHERE deleted_at IS NULL {due} ORDER BY created_at DESC LIMIT ?",
+            (*([revisit_by] if revisit_by else []), limit if limit and limit > 0 else -1),
         ).fetchall()
         return with_children(conn, rows)
 
@@ -303,6 +329,20 @@ def list_readings(limit: int | None = None) -> list[dict]:
 def get_reading(reading_id: str) -> dict:
     with db() as conn:
         return get_row(conn, reading_id)
+
+
+def check_clarify(clarify: dict[int, str], cards: list[int]) -> str:
+    if any(not 0 <= i < len(cards) for i in clarify):
+        raise HTTPException(422, "clarify must name card indexes of this reading")
+    return json.dumps({str(i): t for i, t in sorted(clarify.items()) if t.strip()}) if any(t.strip() for t in clarify.values()) else ""
+
+
+def options_column(options: list[str]) -> str:
+    """One name per line; trailing unnamed options are left out."""
+    names = [" ".join(o.split()) for o in options]
+    while names and not names[-1]:
+        names.pop()
+    return "\n".join(names)
 
 
 def card_columns(cards: list[int], reversed_: list[bool] | None, rounds: list[int] | None, reshuffled: list[int]) -> dict:
@@ -317,6 +357,7 @@ def card_columns(cards: list[int], reversed_: list[bool] | None, rounds: list[in
 @app.post("/api/readings", status_code=201)
 def create_reading(body: NewReading) -> dict:
     check_cards(body.deck, body.cards, body.reversed, body.rounds, body.reshuffled)
+    check_clarify(body.clarify, body.cards)
     created = stamp(body.created_at)
     # Filed under the day where it was drawn: the page sends its local offset.
     day = body.created_at.date().isoformat() if body.created_at else created[:10]
@@ -324,10 +365,11 @@ def create_reading(body: NewReading) -> dict:
     c = card_columns(body.cards, body.reversed, body.rounds, body.reshuffled)
     with db() as conn:
         conn.execute(
-            "INSERT INTO readings (id, created_at, deck, spread, variant, question, impression, cards, reversed, rounds, reshuffled, summary)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO readings (id, created_at, deck, spread, variant, question, impression, cards, reversed, rounds, reshuffled,"
+            " options, clarify, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (reading_id, created, body.deck, body.spread, body.variant, body.question, body.impression,
-             c["cards"], c["reversed"], c["rounds"], c["reshuffled"], body.summary),
+             c["cards"], c["reversed"], c["rounds"], c["reshuffled"], options_column(body.options),
+             check_clarify(body.clarify, body.cards), body.summary),
         )
         return get_row(conn, reading_id)
 
@@ -348,11 +390,18 @@ def edit_reading(reading_id: str, body: Edit) -> dict:
             if body.base != row["cards"]:
                 raise HTTPException(409, "the reading's cards changed since this change began")
             c = card_columns(body.cards, body.reversed, body.rounds, body.reshuffled)
+            # What fewer cards no longer have goes with them.
+            clarify = body.clarify if body.clarify is not None else {int(i): t for i, t in row["clarify"].items()}
+            clarify = {i: t for i, t in clarify.items() if i < len(body.cards)}
             conn.execute(
-                "UPDATE readings SET cards = ?, reversed = ?, rounds = ?, reshuffled = ? WHERE id = ?",
-                (c["cards"], c["reversed"], c["rounds"], c["reshuffled"], reading_id),
+                "UPDATE readings SET cards = ?, reversed = ?, rounds = ?, reshuffled = ?, clarify = ? WHERE id = ?",
+                (c["cards"], c["reversed"], c["rounds"], c["reshuffled"], check_clarify(clarify, body.cards), reading_id),
             )
-        for field in ("question", "impression", "summary"):
+        elif body.clarify is not None:
+            conn.execute("UPDATE readings SET clarify = ? WHERE id = ?", (check_clarify(body.clarify, row["cards"]), reading_id))
+        if body.options is not None:
+            conn.execute("UPDATE readings SET options = ? WHERE id = ?", (options_column(body.options), reading_id))
+        for field in ("question", "impression", "summary", "takeaway", "revisit_on"):
             value = getattr(body, field)
             if value is not None:
                 conn.execute(f"UPDATE readings SET {field} = ? WHERE id = ?", (value, reading_id))
@@ -364,7 +413,7 @@ def get_interpretation(reading_id: str) -> dict:
     """Just the interpretation, for the page to poll without fetching the card texts again."""
     with db() as conn:
         r = get_row(conn, reading_id)
-    return {"interpretation": r["interpretation"], "interpreted_at": r["interpreted_at"], "earlier": r["earlier"]}
+    return {"interpretation": r["interpretation"], "interpreted_at": r["interpreted_at"], "interpreted_by": r["interpreted_by"], "earlier": r["earlier"]}
 
 
 @app.put("/api/readings/{reading_id}/interpretation")
@@ -373,12 +422,12 @@ def set_interpretation(reading_id: str, body: Interpretation) -> dict:
         r = get_row(conn, reading_id)
         if r["interpretation"] and r["interpretation"] != body.text:
             conn.execute(
-                "INSERT INTO earlier_interpretations (reading_id, text, interpreted_at) VALUES (?, ?, ?)",
-                (reading_id, r["interpretation"], r["interpreted_at"] or now()),
+                "INSERT INTO earlier_interpretations (reading_id, text, interpreted_at, interpreted_by) VALUES (?, ?, ?, ?)",
+                (reading_id, r["interpretation"], r["interpreted_at"] or now(), r["interpreted_by"]),
             )
         conn.execute(
-            "UPDATE readings SET interpretation = ?, interpreted_at = ? WHERE id = ?",
-            (body.text, now(), reading_id),
+            "UPDATE readings SET interpretation = ?, interpreted_at = ?, interpreted_by = ? WHERE id = ?",
+            (body.text, now(), body.by, reading_id),
         )
         return get_row(conn, reading_id)
 

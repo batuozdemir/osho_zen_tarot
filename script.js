@@ -15,6 +15,13 @@ let rounds = null;
 let finished = false;
 let extra = 0;          // clarifiers asked for after a fixed spread was complete, drawn or still to draw
 let base = null;        // a saved reading's cards as the journal has them, while changes to them are not saved yet
+let clarifying = false; // question by question: a clarifier asked for and not drawn yet
+let options = [];       // names given to the spread's options ("Option 1", ...), in order
+let clarify = {};       // what a clarifier is drawn to clarify, by card index
+let showAll = false;    // question by question: the whole sitting on the board, not just the question at hand
+let meaningShown = true; // false while the cards just drawn are looked at before their texts
+let takeaway = '';      // a saved reading's "what I'm taking from this", and the day to come back to it
+let revisitOn = '';
 let flying = false;
 let fanMode = 'fan';    // 'fan' or 'piles' (while the deck is cut)
 let cutDone = false;
@@ -54,22 +61,44 @@ function flushQuestion() {
 }
 
 // What Batu writes himself on a reading. A question-by-question reading keeps all its
-// questions in `question`, one line each, in order.
+// questions in `question`, one line each, in order, and its first impressions the same way.
 function ownWords() {
-  return { question: spread?.session ? joinQuestions(rounds) : $('question').value.trim(), impression: $('impression').value.trim() };
+  return {
+    question: spread?.session ? joinLines(rounds.map(r => r.question)) : $('question').value.trim(),
+    impression: spread?.session ? joinLines(rounds.map(r => r.impression)) : $('impression').value.trim(),
+    options: Array.from({ length: optionCount() }, (_, k) => (options[k] || '').replace(/\s+/g, ' ').trim()),
+  };
 }
 
-function joinQuestions(rs) {
-  const lines = rs.map(r => r.question.replace(/\s+/g, ' ').trim());
+function joinLines(texts) {
+  const lines = texts.map(t => (t || '').replace(/\s+/g, ' ').trim());
   return lines.some(Boolean) ? lines.join('\n') : '';
 }
 
-// The other way: the questions of a reading with these card counts per question, and the
-// questions before which the deck was made whole again.
-const splitRounds = (counts, question, reshuffled = []) => {
+// The other way: the questions of a reading with these card counts per question, their
+// impressions, and the questions before which the deck was made whole again.
+const splitRounds = (counts, question, reshuffled = [], impression = '') => {
   const qs = (question || '').split('\n');
-  return counts.map((cards, i) => ({ question: qs[i] || '', cards, ...(reshuffled.includes(i) && { fresh: true }) }));
+  // A sitting saved before impressions were per question has one, written at its end: the last question's.
+  let is = (impression || '').split('\n');
+  if (is.length > counts.length) is = [...counts.slice(1).map(() => ''), impression.replace(/\s+/g, ' ').trim()];
+  return counts.map((cards, i) => ({ question: qs[i] || '', impression: is[i] || '', cards, ...(reshuffled.includes(i) && { fresh: true }) }));
 };
+
+// How many options a spread's positions name ("Option 1: ...", "Option 2"), so each can get a name.
+function optionCount(s = spread, v = variantIndex) {
+  return s ? Math.max(0, ...s.variants[v].positions.map(p => Number(p.label.match(/^Option (\d+)/)?.[1] || 0))) : 0;
+}
+
+// Positions with the options' names and what each clarifier was drawn to clarify.
+function labelled(ps, names = options, why = clarify, from = 0) {
+  return ps.map((p, i) => {
+    let label = p.label.replace(/^Option (\d+)/, (m, k) => (names[k - 1]?.trim() ? `${m}, ${names[k - 1].replace(/\s+/g, ' ').trim()}` : m));
+    const w = why[from + i]?.replace(/\s+/g, ' ').trim();
+    if (w) label += ` (drawn to clarify: ${w})`;
+    return label === p.label ? p : { ...p, label };
+  });
+}
 
 // The questions (from 0) before which the deck was made whole again.
 const reshuffledOf = rs => (rs ? rs.flatMap((r, i) => (r.fresh ? [i] : [])) : []);
@@ -91,6 +120,11 @@ function beginTransition() {
   // update will not run once the reading is left.
   if (spread && flying) keepLocal();
   flushQuestion();
+  if (takeawayTimer) {
+    clearTimeout(takeawayTimer);
+    takeawayTimer = null;
+    if (readingId) sendTakeaway();
+  }
   // A save still in flight belongs to the reading being left, which now has its final
   // words; the next reading must not overwrite them.
   pendingSave = null;
@@ -428,6 +462,11 @@ function renderPicker() {
     tile.querySelector('.tile-name').textContent = s.name;
     tile.querySelector('.tile-count').textContent = count;
     if (s.hint) {
+      // What it is for, always in view where there is no hover to show the rest.
+      const use = document.createElement('span');
+      use.className = 'tile-use-line';
+      use.textContent = s.hint[1];
+      tile.appendChild(use);
       const hint = document.createElement('span');
       hint.className = 'tile-hint';
       hint.innerHTML = '<span></span><span class="tile-use"></span>';
@@ -500,7 +539,16 @@ function validEntry(e) {
       : Number.isInteger(e.extra ?? 0) && (e.extra ?? 0) >= 0 && e.placed.length <= s.variants[e.variant].positions.length + (e.extra ?? 0)) &&
     Array.isArray(e.deck) && e.deck.every(ok) && distinctCards(s.session ? e.rounds : null, e.placed) &&
     new Set([...sinceWhole(s.session ? e.rounds : null, e.placed), ...e.deck]).size === sinceWhole(s.session ? e.rounds : null, e.placed).length + e.deck.length &&
-    validReversed(e.reversed, e.placed);
+    validReversed(e.reversed, e.placed) && validWords(e.options, e.clarify);
+}
+
+// What the drawn clarifiers were drawn to clarify; a line written for one not drawn yet stays on the page.
+const drawnOnly = (why = {}, cards) => Object.fromEntries(Object.entries(why).filter(([i]) => Number(i) < cards.length));
+
+// Option names and what clarifiers were drawn to clarify, from storage or the journal.
+function validWords(names = [], why = {}) {
+  return Array.isArray(names) && names.every(n => typeof n === 'string') &&
+    !!why && typeof why === 'object' && Object.entries(why).every(([i, t]) => /^\d+$/.test(i) && typeof t === 'string');
 }
 
 // Where the journal exists: the server has answered on this origin before, so a finished
@@ -519,16 +567,22 @@ function keepLocal() {
   if (placed.length && (readingId ? !!base : !done || journalOrigin)) {
     // The one unfinished new reading kept is per deck, so switching decks loses neither.
     if (!done) list = list.filter(e => entryDone(e) || entryDeck(e) !== D || e.readingId);
-    list.unshift({
-      key: localKey, deckId: D.id, spread: spread.id, variant: variantIndex, placed, reversed, deck, cutDone,
-      ...(rounds && { rounds, finished }), ...(extra && { extra }), ...(readingId && { readingId, base }),
-      question: rounds ? joinQuestions(rounds) : $('question').value, impression: $('impression').value, drawnAt, at: new Date().toISOString(),
-    });
+    list.unshift(localEntry());
   }
   if (!storeLocal(list) && done && journalOrigin && !readingId && !keepLocal.warned) {
     keepLocal.warned = true;
     toast('This reading could not be kept on this device.');
   }
+}
+
+// The reading on screen as it is kept on this device.
+function localEntry() {
+  return {
+    key: localKey, deckId: D.id, spread: spread.id, variant: variantIndex, placed: placed.slice(), reversed: reversed?.slice() ?? null, deck: deck.slice(), cutDone,
+    ...(rounds && { rounds: rounds.map(r => ({ ...r })), finished }), ...(clarifying && { clarifying }), ...(extra && { extra }), ...(readingId && { readingId, base }),
+    ...(options.some(Boolean) && { options: options.slice() }), ...(Object.keys(clarify).length && { clarify: { ...clarify } }),
+    question: rounds ? joinLines(rounds.map(r => r.question)) : $('question').value, impression: $('impression').value, drawnAt, at: new Date().toISOString(),
+  };
 }
 
 function resumeLocal(e) {
@@ -551,8 +605,15 @@ function resumeLocal(e) {
   placed = e.placed;
   reversed = e.reversed ?? null;
   rounds = spread.session ? e.rounds : null;
+  // Kept before impressions were per question: the sitting's one impression goes to its last question.
+  if (rounds && e.impression && !rounds.some(r => 'impression' in r)) rounds.at(-1).impression = e.impression;
   finished = spread.session && !!e.finished;
   extra = spread.session ? 0 : e.extra || 0;
+  // A clarifier asked for stays asked for, with what it should clarify.
+  clarifying = !!(spread.session && e.clarifying && !finished && rounds.at(-1).cards >= 3);
+  showAll = false;
+  options = e.options || [];
+  clarify = e.clarify || {};
   deck = e.deck;
   cutDone = e.cutDone || isParadox() && placed.length >= 2;
   fanMode = 'fan';
@@ -563,8 +624,10 @@ function resumeLocal(e) {
   }
   localKey = e.key;
   drawnAt = e.drawnAt || (isDone() ? e.at : null);
+  meaningShown = isDone();
   $('question').value = rounds ? rounds.at(-1).question : e.question || '';
-  $('impression').value = e.impression || '';
+  $('impression').value = rounds ? rounds.at(-1).impression || '' : e.impression || '';
+  renderOptions();
   renderBoard();
   renderFan();
   update();
@@ -583,11 +646,20 @@ async function hydrate(id) {
     return;
   }
   if (!isCurrent(g) || readingId !== id) return;
-  interpretation = r.interpretation ? { text: r.interpretation, at: r.interpreted_at } : null;
-  earlier = r.earlier || [];
-  notes = r.notes || [];
+  journalState(r);
   update();
   startPolling();
+}
+
+// What the journal holds about a saved reading besides its cards and words.
+function journalState(r) {
+  interpretation = r.interpretation ? { text: r.interpretation, at: r.interpreted_at, by: r.interpreted_by } : null;
+  earlier = r.earlier || [];
+  notes = r.notes || [];
+  takeaway = r.takeaway || '';
+  revisitOn = r.revisit_on || '';
+  $('takeawayText').value = takeaway;
+  $('revisitDate').value = revisitOn;
 }
 
 // Saves finished readings that were kept on this device while the journal was out of reach.
@@ -607,14 +679,16 @@ async function saveKeptReadings() {
     const at = e.drawnAt || e.at;
     const rev = e.reversed ?? null;
     const rs = s.session ? e.rounds : null;
-    const question = rs ? joinQuestions(rs) : (e.question || '').trim();
+    const question = rs ? joinLines(rs.map(r => r.question)) : (e.question || '').trim();
+    const impression = rs ? (rs.some(r => 'impression' in r) ? joinLines(rs.map(r => r.impression)) : oneLine(e.impression)) : (e.impression || '').trim();
+    const names = Array.from({ length: optionCount(s, e.variant) }, (_, k) => e.options?.[k] || ''), why = drawnOnly(e.clarify, e.placed);
     try {
       await api('readings', {
         method: 'POST',
         body: JSON.stringify({
-          deck: dk.id, spread: e.spread, variant: e.variant, question,
-          impression: (e.impression || '').trim(), cards: e.placed, reversed: rev, rounds: rs?.map(r => r.cards) ?? null, reshuffled: reshuffledOf(rs), created_at: localStamp(at),
-          summary: readingText({ dk, spread: s, variant: e.variant, cards: e.placed, reversed: rev, rounds: rs, question, impression: e.impression, date: at }),
+          deck: dk.id, spread: e.spread, variant: e.variant, question, impression, options: names, clarify: why,
+          cards: e.placed, reversed: rev, rounds: rs?.map(r => r.cards) ?? null, reshuffled: reshuffledOf(rs), created_at: localStamp(at),
+          summary: readingText({ dk, spread: s, variant: e.variant, cards: e.placed, reversed: rev, rounds: rs, question, impression, options: names, clarify: why, date: at }),
         }),
       });
       dropLocal(e.key);
@@ -709,12 +783,22 @@ function showView(name) {
 // ---------- reading ----------
 
 // The question being drawn for has an empty place for each of its three cards; a clarifier
-// gets its place only once it is in the air, so an empty place never suggests one.
+// gets its place once it is asked for.
 function positions() {
-  return spread.session
-    ? sessionPositions(rounds, !finished && (rounds.at(-1).cards < 3 || flying))
-    : spreadPositions(spread, variantIndex, extra);
+  return labelled(spread.session
+    ? sessionPositions(rounds, !finished && (rounds.at(-1).cards < 3 || flying || clarifying))
+    : spreadPositions(spread, variantIndex, extra));
 }
+
+// Question by question: while the sitting is open, the board holds the question at hand and the
+// earlier ones are rows above it, unless the whole sitting is asked for. The index of the first
+// card on the board.
+function boardFrom() {
+  if (!spread.session || finished || showAll || rounds.length < 2) return 0;
+  return rounds.slice(0, -1).reduce((t, r) => t + r.cards, 0);
+}
+
+const boardPositions = () => positions().slice(boardFrom());
 
 // A fixed spread's positions, then `extra` clarifiers in a row under it, under a tag.
 function spreadPositions(s, v, extra = 0) {
@@ -725,9 +809,10 @@ function spreadPositions(s, v, extra = 0) {
   return [...ps, ...Array.from({ length: extra }, (_, k) => ({ ...P(`Clarifier ${k + 1}`, b.minX + 0.56 + k * 1.15, y), above: TAG }))];
 }
 
-// The positions of a reading's cards, clarifiers included.
-function readingPositions(s, v, cards, rounds) {
-  return rounds ? sessionPositions(rounds) : spreadPositions(s, v, Math.max(0, cards.length - s.variants[v].positions.length));
+// The positions of a reading's cards, clarifiers included, with its option names and what its
+// clarifiers were drawn to clarify.
+function readingPositions(s, v, cards, rounds, names = [], why = {}) {
+  return labelled(rounds ? sessionPositions(rounds) : spreadPositions(s, v, Math.max(0, cards.length - s.variants[v].positions.length)), names, why);
 }
 
 // One row per question: its three cards, then any clarifiers after a small gap, under a tag with the
@@ -750,12 +835,12 @@ function sessionPositions(rs, open = false) {
 function renderRoundTags() {
   const board = $('board');
   board.querySelectorAll('.round-tag').forEach(t => t.remove());
-  const ps = positions(), b = bounds(ps), base = spread.session ? 0 : spread.variants[variantIndex].positions.length;
+  const from = boardFrom(), ps = boardPositions(), b = bounds(ps), base = spread.session ? 0 : spread.variants[variantIndex].positions.length;
   const tags = spread.session
     ? rounds.map((r, ri, rs) => ({ at: rs.slice(0, ri).reduce((t, x) => t + x.cards, 0), name: `Question ${ri + 1}`, ready: r.cards >= 3, copy: () => copyQuestion(ri) }))
     : extra ? [{ at: base, name: 'Clarifiers', ready: placed.length > base, copy: () => copyText(clarifierText(), 'Clarifiers copied.') }] : [];
   tags.forEach(t => {
-    const p = ps[t.at];
+    const p = t.at >= from && ps[t.at - from];
     if (!p) return;
     const tag = document.createElement('div');
     tag.className = 'round-tag';
@@ -771,16 +856,57 @@ function renderRoundTags() {
   });
 }
 
-// The board after it grew or shrank by a place: a question, a clarifier.
+// The board after it grew or shrank by a place: a question, a clarifier. When it now starts
+// from another card (a question at hand of its own, or the whole sitting), it is drawn anew.
 function growBoard() {
+  const from = boardFrom();
+  if (Number($('board').querySelector('.slot')?.dataset.index ?? from) !== from) return renderBoard();
   // The board's children are its slots, one per position, before the tags go back on.
   $('board').querySelectorAll('.round-tag').forEach(t => t.remove());
-  layout($('board'), positions(), true).forEach((slot, i) => {
+  layout($('board'), boardPositions(), true).forEach((slot, i) => {
     if (slot.dataset.index) return;
-    slot.dataset.index = i;
+    slot.dataset.index = from + i;
     slot.classList.add('empty');
-    slot.innerHTML = `<span class="slot-num">${i + 1}</span>`;
+    slot.innerHTML = `<span class="slot-num">${from + i + 1}</span>`;
   });
+}
+
+// The questions before the one at hand, while it has the board: a row each, with its cards
+// small, each opening its card, and its Copy.
+function renderEarlierRounds() {
+  const list = $('earlierRounds'), from = boardFrom();
+  list.replaceChildren();
+  $('sittingToggle').hidden = !spread.session || finished || rounds.length < 2;
+  if ($('sittingToggle').hidden) return;
+  $('sittingToggle').textContent = showAll ? `Just question ${rounds.length}` : 'View the whole sitting';
+  if (!from) return;
+  let at = 0;
+  rounds.slice(0, -1).forEach((r, ri) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="earlier-q"></span><span class="earlier-cards"></span><button class="ghost">Copy</button>';
+    const words = r.question.replace(/\s+/g, ' ').trim();
+    li.querySelector('.earlier-q').textContent = `Question ${ri + 1}${words ? `: ${words}` : ''}`;
+    for (let k = 0; k < r.cards; k++) {
+      const i = at + k, n = placed[i];
+      const b = document.createElement('button');
+      b.className = 'earlier-card';
+      b.innerHTML = `<img alt="" src="${cardThumb(n)}"${isRev(i) ? ' class="reversed"' : ''}>`;
+      b.setAttribute('aria-label', cardName(n) + (isRev(i) ? ', reversed' : ''));
+      b.addEventListener('click', () => openCard(n, i));
+      li.querySelector('.earlier-cards').appendChild(b);
+    }
+    li.lastChild.setAttribute('aria-label', `Copy question ${ri + 1}`);
+    li.lastChild.addEventListener('click', () => copyQuestion(ri));
+    list.appendChild(li);
+    at += r.cards;
+  });
+}
+
+function toggleSitting() {
+  if (flying) return;
+  showAll = !showAll;
+  renderBoard();
+  update();
 }
 
 function isParadox() {
@@ -810,14 +936,16 @@ function openSpread(id, variant = 0, question = '') {
   beginTransition();  // before anything about the old reading is replaced
   setupSpread(s, Number.isInteger(variant) && variant >= 0 ? variant : 0);
   $('question').value = question;
+  options = [];
   newReading();
   track(`Spread: ${s.name}${D.id === 'osho' ? '' : ` (${D.title})`}`);
 }
 
 // Opens a finished reading from a link:
-// #r?d=<deck>&s=<spread>&v=<variant>&c=<cards>&rv=<0 or 1 per card>&g=<cards per question>&q=<question>&id=<journal id>
-// `d` is left out for the Osho Zen deck, `rv` when reversals were off, `g` but for the
-// question-by-question spread (whose `q` holds every question, one line each).
+// #r?d=<deck>&s=<spread>&v=<variant>&c=<cards>&rv=<0 or 1 per card>&g=<cards per question>&f=<reshuffled>&q=<question>&o=<option names>&id=<journal id>
+// `d` is left out for the Osho Zen deck, `rv` when reversals were off, `g` and `f` but for the
+// question-by-question spread (whose `q` holds every question, one line each), `o` (one name
+// a line) when no option was named.
 function openSharedReading(params) {
   setDeck(DECKS[params.get('d')] ? params.get('d') : 'osho');
   const s = findSpread(params.get('s'));
@@ -837,11 +965,16 @@ function openSharedReading(params) {
   rounds = rs;
   finished = !!rs;
   extra = rs ? 0 : cards.length - s.variants[v].positions.length;
+  options = (params.get('o') || '').split('\n');
+  clarify = {};
+  clarifying = showAll = false;
+  meaningShown = true;
   deck = shuffle(allCards().filter(n => !sinceWhole(rs, cards).includes(n)));
   cutDone = true;
   fanMode = 'fan';
   $('question').value = rs ? rs.at(-1).question : params.get('q') || '';
   $('impression').value = '';
+  renderOptions();
   resetJournalState();
   localKey = null;
   drawnAt = null;
@@ -861,6 +994,7 @@ function showHome() {
   showView('picker');
   renderLocal();
   renderRecent();
+  renderRevisits();
 }
 
 // Clears what belongs to a journal entry, before another reading takes the screen.
@@ -872,12 +1006,38 @@ function resetJournalState() {
   earlier = [];
   ownReading = false;
   verified = true;
+  takeaway = revisitOn = '';
+  $('takeawayText').value = $('revisitDate').value = $('outsideText').value = '';
+  $('keepOutside').open = false;
   setReadOnly(false);
 }
 
 function setReadOnly(on) {
   $('question').readOnly = on;
   $('impression').readOnly = on;
+  document.querySelectorAll('#optionFields input').forEach(i => { i.readOnly = on; });
+}
+
+// A name field for each option the spread's positions name, so the reading says which is which.
+function renderOptions() {
+  const box = $('optionFields'), count = optionCount();
+  box.hidden = !count;
+  if (box.children.length !== count) {
+    box.replaceChildren(...Array.from({ length: count }, (_, k) => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = 200;
+      input.placeholder = `Option ${k + 1}`;
+      input.setAttribute('aria-label', `Name of option ${k + 1}`);
+      input.addEventListener('input', () => {
+        // Kept dense: naming option 2 first must not leave a hole where option 1 goes.
+        options = Array.from({ length: Math.max(options.length, k + 1) }, (_, j) => (j === k ? input.value : options[j] || ''));
+        if (spread) { renderPositionList(); onWordsInput(); }
+      });
+      return input;
+    }));
+  }
+  [...box.children].forEach((input, k) => { input.value = options[k] || ''; input.readOnly = !verified; });
 }
 
 function newReading() {
@@ -885,15 +1045,19 @@ function newReading() {
   deck = shuffle(allCards());
   placed = [];
   reversed = null;
-  rounds = spread.session ? [{ question: $('question').value, cards: 0 }] : null;
+  rounds = spread.session ? [{ question: $('question').value, impression: '', cards: 0 }] : null;
   finished = false;
   extra = 0;
+  clarify = {};
+  clarifying = showAll = false;
+  meaningShown = false;
   fanMode = 'fan';
   cutDone = false;
   resetJournalState();
   localKey = newKey();
   drawnAt = null;
   $('impression').value = '';
+  renderOptions();
   renderBoard();
   renderFan();
   update();
@@ -901,8 +1065,9 @@ function newReading() {
 }
 
 function renderBoard() {
-  const slots = layout($('board'), positions());
-  slots.forEach((slot, i) => {
+  const from = boardFrom();
+  layout($('board'), boardPositions()).forEach((slot, k) => {
+    const i = from + k;
     slot.dataset.index = i;
     if (placed[i]) {
       fillSlot(slot, placed[i], false, isRev(i));
@@ -937,6 +1102,15 @@ function isDone() {
   return spread.session ? finished : placed.length >= positions().length;
 }
 
+// The fan is open for the next card; in a sitting, not once the question at hand has its three
+// cards, until a clarifier is asked for, so another card is always drawn on purpose.
+function fanOpen() {
+  return !isDone() && !(spread.session && rounds.at(-1).cards >= 3 && !clarifying);
+}
+
+// A clarifier asked for and not drawn yet.
+const clarifierWaiting = () => !isDone() && (spread.session ? clarifying : extra > 0 && placed.length < positions().length);
+
 // A finished reading drawn here that the journal does not have yet.
 function waitingForJournal() {
   return isDone() && !readingId && !!localKey && journalOrigin && !saving;
@@ -955,9 +1129,9 @@ function statusText() {
   if (isParadox() && !cutDone) return 'Shuffle for as long as you like, then cut the deck and choose a pack.';
   if (spread.session) {
     const q = rounds.length, have = rounds[q - 1].cards;
-    const now = have < 3
-      ? `Question ${q}, card ${have + 1} of 3.`
-      : `Question ${q} has its three cards. Draw a clarifier if they need one, or go on to the next question, or finish.`;
+    const now = have < 3 ? `Question ${q}, card ${have + 1} of 3.`
+      : clarifying ? `Draw a clarifier for question ${q}.`
+      : `Question ${q} has its ${have > 3 ? 'cards' : 'three cards'}. Draw a clarifier if they need one, or go on to the next question, or finish.`;
     return placed.length === 0 && !cutDone ? `Write your question, then draw. ${now} Shuffle or cut first if you like.` : now;
   }
   const next = `Card ${placed.length + 1} of ${ps.length}: ${ps[placed.length].label}`;
@@ -965,26 +1139,51 @@ function statusText() {
 }
 
 function update() {
-  const ps = positions();
-  const done = isDone();
+  const done = isDone(), open = fanOpen();
   $('board').querySelectorAll('.slot').forEach(s => s.classList.remove('next'));
-  if (!done) slotAt(placed.length)?.classList.add('next');
+  if (open) slotAt(placed.length)?.classList.add('next');
 
   $('status').textContent = statusText();
-  $('fan').classList.toggle('closed', done);
-  $('fan').inert = done;
-  $('deckControls').hidden = done || (placed.length > 0 && !betweenQuestions()) || fanMode === 'piles' || (isParadox() && cutDone);
+  $('fan').classList.toggle('closed', !open);
+  $('fan').inert = !open;
+  $('deckControls').hidden = !open || (placed.length > 0 && !betweenQuestions()) || fanMode === 'piles' || (isParadox() && cutDone);
   $('resetDeckButton').hidden = !betweenQuestions() || rounds.length < 2 || deck.length === D.total;
   renderReversalsButton();
-  // A question gets its three cards before the next question or the end. A complete reading
-  // can always be taken up again: a sitting for more questions, a spread for a clarifier.
-  $('sessionControls').hidden = flying || (done ? saving || !verified : !spread.session || rounds.at(-1).cards < 3);
-  $('nextQuestionButton').hidden = $('finishButton').hidden = done;
+  // A question gets its three cards before a clarifier, the next question or the end. A complete
+  // reading can always be taken up again: a sitting for more questions, a spread for a clarifier.
+  const atThree = !!spread.session && !done && rounds.at(-1).cards >= 3 && !clarifying;
+  $('sessionControls').hidden = flying || (done ? saving || !verified : !atThree);
+  $('nextQuestionButton').hidden = $('finishButton').hidden = $('clarifierButton').hidden = !atThree;
   $('continueButton').hidden = !done;
   $('continueButton').textContent = spread.session ? 'Continue the sitting' : 'Draw a clarifier';
+  // What the clarifier asked for is to clarify, written before it is drawn.
+  $('clarifyField').hidden = flying || !clarifierWaiting();
+  if (!$('clarifyField').hidden && $('clarifyText').value !== (clarify[placed.length] || '')) $('clarifyText').value = clarify[placed.length] || '';
   $('questionLabel').textContent = spread.session ? `Question ${rounds.length}` : 'Your question';
   $('question').placeholder = spread.session && rounds.length > 1 ? 'The next question' : 'What would you like to look at?';
 
+  // Your own first look, before the card texts: once the spread is complete, or in a sitting
+  // once the question at hand has its three cards.
+  $('impressionField').hidden = !(done || (spread.session && rounds.at(-1).cards >= 3));
+  $('impressionLabel').textContent = spread.session && rounds.length > 1 ? `Question ${rounds.length}: what do you notice, before reading the card texts?` : 'What do you notice, before reading the card texts?';
+
+  renderPositionList();
+  renderRoundTags();
+  renderEarlierRounds();
+  renderDiscuss();
+  $('linkButton').disabled = !done;
+  $('undoButton').disabled = !canUndo() || (isParadox() && placed.length <= 2);
+  history.replaceState(null, '', done ? `#${shareHash()}` : spreadHash());
+  keepLocal();
+  renderSaved();
+  renderInterpretation();
+  renderTakeaway();
+  renderNotes();
+}
+
+// Every position with its card, a sitting's questions heading their cards.
+function renderPositionList() {
+  const ps = positions();
   const list = $('positions');
   list.replaceChildren();
   // Where each question starts, for a heading with its words above its cards.
@@ -994,10 +1193,12 @@ function update() {
     if (starts.has(i)) {
       const head = document.createElement('li');
       head.className = 'round-head';
-      const ri = starts.get(i);
-      const words = (ri === rounds.length - 1 ? $('question').value : rounds[ri].question).trim();
-      head.innerHTML = '<span></span><button class="ghost">Copy</button>';
-      head.firstChild.textContent = `Question ${ri + 1}${words ? `: ${words}` : ''}`;
+      const ri = starts.get(i), last = ri === rounds.length - 1;
+      const words = (last ? $('question').value : rounds[ri].question).trim();
+      const seen = last ? '' : (rounds[ri].impression || '').trim();
+      head.innerHTML = '<span><span class="round-words"></span><span class="round-seen"></span></span><button class="ghost">Copy</button>';
+      head.querySelector('.round-words').textContent = `Question ${ri + 1}${words ? `: ${words}` : ''}`;
+      head.querySelector('.round-seen').textContent = seen ? `You noticed: ${seen}` : '';
       head.lastChild.hidden = rounds[ri].cards < 3;
       head.lastChild.setAttribute('aria-label', `Copy question ${ri + 1}`);
       head.lastChild.addEventListener('click', () => copyQuestion(ri));
@@ -1013,17 +1214,34 @@ function update() {
     if (n) li.addEventListener('click', () => openCard(n, i));
     list.appendChild(li);
   });
+}
 
-  renderRoundTags();
-  $('impressionField').hidden = !done;
-  $('copyButton').disabled = !done && !(spread.session && completeRounds() > 0);
-  $('linkButton').disabled = !done;
-  $('undoButton').disabled = !canUndo() || (isParadox() && placed.length <= 2);
-  history.replaceState(null, '', done ? `#${shareHash()}` : spreadHash());
-  keepLocal();
-  renderSaved();
-  renderInterpretation();
-  renderNotes();
+// Taking the reading to a chat: a copy that starts the conversation, a short one for what was
+// added since, and on the journal, a request for Claude and a place to keep what another chat said.
+function renderDiscuss() {
+  const done = isDone();
+  $('discuss').hidden = !(done || (spread.session && completeRounds() > 0));
+  if ($('discuss').hidden) return;
+  const more = sameChatCopy();
+  $('copyMoreButton').hidden = !more;
+  if (more) $('copyMoreButton').textContent = more.label;
+  const journal = !!readingId && server.on && verified && done && !base;
+  $('claudeAsk').hidden = !journal;
+  $('viewInterpretation').hidden = !interpretation;
+  $('keepOutside').hidden = !journal;
+}
+
+// What was added since the conversation started, to paste into that same chat: the last question
+// that has its cards (once there is more than the first), or a spread's clarifiers.
+function sameChatCopy() {
+  if (spread.session) {
+    const k = completeRounds() - 1;
+    if (k < 0 || (k === 0 && rounds[0].cards === 3)) return null;
+    return { label: `Copy question ${k + 1}, for the same chat`, run: () => copyQuestion(k) };
+  }
+  return placed.length > spread.variants[variantIndex].positions.length
+    ? { label: 'Copy the clarifiers, for the same chat', run: () => copyText(clarifierText(), 'Clarifiers copied.') }
+    : null;
 }
 
 // ---------- the fan ----------
@@ -1091,7 +1309,7 @@ function layoutPiles(cards, W, cw) {
 }
 
 function onFanClick(cardEl) {
-  if (flying || isDone()) return;
+  if (flying || !fanOpen()) return;
   if (fanMode === 'piles') return choosePile(Number(cardEl.dataset.pile));
   if (isParadox() && !cutDone) return toast('First cut the deck and choose a pack.');
   pick(cardEl);
@@ -1169,13 +1387,13 @@ async function choosePile(pile) {
 }
 
 function pick(cardEl) {
-  if (flying || isDone()) return;
+  if (flying || !fanOpen()) return;
   const g = gen;
   flying = true;
-  if (spread.session) growBoard();  // a clarifier's place
   place(cardEl).then(() => {
     if (!isCurrent(g)) return;
     flying = false;
+    clarifying = false;
     if (spread.session) growBoard();
     if (isDone()) return completed();
     update();
@@ -1261,9 +1479,7 @@ const cardsLocked = () => !!interpretation || notes.length > 0 || addingNote || 
 const undoFloor = () => (readingId && cardsLocked() ? (base ?? placed).length : 0);
 
 // A question asked but not drawn for yet, or a clarifier asked for but not drawn yet.
-const emptyPlace = () => spread.session
-  ? !finished && rounds.length > 1 && rounds.at(-1).cards === 0
-  : extra > 0 && placed.length < positions().length;
+const emptyPlace = () => clarifierWaiting() || (!!spread.session && !finished && rounds.length > 1 && rounds.at(-1).cards === 0);
 
 function canUndo() {
   return !!spread && !flying && (emptyPlace() || placed.length > undoFloor());
@@ -1291,24 +1507,28 @@ function undo() {
     unsave();
   }
   // A question asked but not yet drawn for goes first, giving back the one before it; a
-  // clarifier's empty place, giving back the complete spread.
+  // clarifier's empty place, giving back the question or the complete spread.
   if (emptyPlace()) {
-    if (spread.session) {
+    if (clarifierWaiting()) {
+      delete clarify[placed.length];
+      if (spread.session) clarifying = false;
+      else extra--;
+    } else {
       // A deck made whole for that question goes back to what was left of it.
       if (rounds.pop().fresh) {
         deck = shuffle(allCards().filter(n => !sinceWhole(rounds, placed).includes(n)));
         renderFan();
       }
       $('question').value = rounds.at(-1).question;
-    } else {
-      extra--;
+      $('impression').value = rounds.at(-1).impression || '';
     }
     growBoard();
     if (isDone()) return completed();
     update();
     return;
   }
-  if (rounds) rounds[rounds.length - 1].cards--;
+  // A clarifier taken back leaves its place, as a spread's does, for another draw or one more undo.
+  if (rounds) clarifying = rounds[rounds.length - 1].cards-- > 3;
   finished = false;
   const n = placed.pop();
   reversed?.pop();
@@ -1323,9 +1543,10 @@ function undo() {
 // ---------- question by question ----------
 
 function nextQuestion() {
-  if (!spread?.session || finished || flying || rounds.at(-1).cards < 3) return;
-  rounds.push({ question: '', cards: 0 });
-  $('question').value = '';
+  if (!spread?.session || finished || flying || clarifying || rounds.at(-1).cards < 3) return;
+  rounds.push({ question: '', impression: '', cards: 0 });
+  $('question').value = $('impression').value = '';
+  meaningShown = false;
   growBoard();
   update();
   $('question').focus();
@@ -1341,11 +1562,20 @@ function resetDeck() {
   renderFan();
   update();
   play('shuffle');
-  toast('The deck is whole again and shuffled.');
+  toast('The deck is whole again and shuffled. Earlier cards may come up again; the sitting stays as it is.');
+}
+
+// A clarifier for the question at hand: its place, the fan opened for it, and a line for what it
+// should clarify.
+function askClarifier() {
+  if (!spread?.session || finished || flying || clarifying || rounds.at(-1).cards < 3) return;
+  clarifying = true;
+  growBoard();
+  update();
 }
 
 function finishSession() {
-  if (!spread?.session || finished || flying || rounds.at(-1).cards < 3) return;
+  if (!spread?.session || finished || flying || clarifying || rounds.at(-1).cards < 3) return;
   finished = true;
   growBoard();
   completed();
@@ -1372,14 +1602,25 @@ function changeVariant() {
     return;
   }
   flushQuestion();
-  const before = positions().length;
+  const before = positions().length, from = variantIndex;
   variantIndex = Number($('variantSelect').value);
+  renderOptions();
   if (positions().length !== before || readingId || saving) {
-    newReading();
+    startOver(`A new reading with this variation. The cards drawn went back to the deck.`, from);
   } else {
     renderBoard();
     update();
   }
+}
+
+// Starting over, by hand or with another variation: cards drawn but not yet in the journal can
+// be brought back from the toast.
+function startOver(message, fromVariant = variantIndex) {
+  // Not while its first save is on the way: it lands in the journal, and restoring it would save it twice.
+  const back = placed.length && !saving && !(readingId && !base) && { ...localEntry(), variant: fromVariant, key: localKey || newKey() };
+  if (localKey && !isDone()) dropLocal(localKey);
+  newReading();
+  if (back) toast(message, { label: 'Undo', run: () => { storeLocal([back, ...localReadings().filter(e => e.key !== back.key)]); resumeLocal(back); } });
 }
 
 // ---------- links ----------
@@ -1389,8 +1630,9 @@ function shareHash() {
   if (reversed) p.set('rv', reversed.map(Number).join(''));
   if (rounds) p.set('g', rounds.map(r => r.cards).join('-'));
   if (reshuffledOf(rounds).length) p.set('f', reshuffledOf(rounds).join('-'));
-  const q = ownWords().question;
+  const { question: q, options: o } = ownWords();
   if (q) p.set('q', q);
+  if (o.some(Boolean)) p.set('o', o.join('\n'));
   if (readingId) p.set('id', readingId);
   return `r?${p}`;
 }
@@ -1436,7 +1678,10 @@ async function detectServer() {
     journalOrigin = true;
     try { localStorage.setItem('tarot-journal', 'yes'); } catch {}
   }
-  $('journalLink').hidden = !server.on;
+  // Where the journal has answered before, it stays in the bar when out of reach, saying so.
+  $('journalLink').hidden = !server.on && !journalOrigin;
+  $('journalLink').classList.toggle('offline', !server.on);
+  $('journalLink').textContent = server.on ? 'Journal' : 'Journal · offline';
 }
 
 // ---------- asking Jev which spread (server only) ----------
@@ -1449,6 +1694,8 @@ let carriedQuestion = '';
 function clearAsk() {
   askGen++;
   $('askResult').replaceChildren();
+  $('askResult').classList.remove('scores');
+  $('askScores').hidden = true;
   $('askSubmit').disabled = false;
 }
 
@@ -1478,15 +1725,19 @@ async function askJev(event) {
   if (g !== askGen) return;
   $('askSubmit').disabled = false;
   const ranked = list.map(s => ({ s, p: r.probabilities[s.id] || 0 })).sort((a, b) => b.p - a.p);
-  // Spreads under 5% are left out, but the top one is always shown.
-  const shown = ranked.filter((x, i) => i === 0 || x.p >= 0.05);
+  // Spreads under 5% are left out, but the top one is always shown, and no more than four.
+  // What each is for leads; the scores, how Jev weighed them against each other, are a tap away.
+  const shown = ranked.filter((x, i) => i === 0 || x.p >= 0.05).slice(0, 4);
+  $('askScores').hidden = false;
+  $('askScores').textContent = 'Show scores';
   $('askResult').replaceChildren(...shown.map(({ s, p }) => {
     const li = document.createElement('li');
     const a = document.createElement('a');
     a.href = `#${s.id}`;
     a.style.setProperty('--p', p);
-    a.innerHTML = '<span class="ask-name"></span><span class="ask-score"></span>';
-    a.firstChild.textContent = s.name;
+    a.innerHTML = '<span class="ask-text"><span class="ask-name"></span><span class="ask-use"></span></span><span class="ask-score"></span>';
+    a.querySelector('.ask-name').textContent = s.name;
+    a.querySelector('.ask-use').textContent = s.hint?.[1] || '';
     a.lastChild.textContent = `${Math.round(p * 100)}%`;
     a.addEventListener('click', () => { carriedQuestion = question; });
     li.appendChild(a);
@@ -1510,7 +1761,7 @@ async function saveReading() {
     r = await api('readings', {
       method: 'POST',
       body: JSON.stringify({
-        deck: D.id, spread: spread.id, variant: variantIndex, ...words, cards: placed, reversed,
+        deck: D.id, spread: spread.id, variant: variantIndex, ...words, clarify: drawnOnly(clarify, placed), cards: placed, reversed,
         rounds: rounds?.map(r => r.cards) ?? null, reshuffled: reshuffledOf(rounds), summary: readingText(),
         ...(drawnAt && { created_at: localStamp(drawnAt) }),
       }),
@@ -1540,7 +1791,7 @@ async function saveReading() {
   // Left for another view while saving: the reading stays in the journal, with the
   // question and impression as they were when it was left.
   if (!isCurrent(g)) {
-    const changed = job.final && (job.final.question !== words.question || job.final.impression !== words.impression);
+    const changed = job.final && JSON.stringify(job.final) !== JSON.stringify({ ...words, summary: job.final.summary });
     const update = changed
       ? api(`readings/${r.id}`, { method: 'PATCH', body: JSON.stringify(job.final) }).catch(() => {})
       : Promise.resolve();
@@ -1551,8 +1802,7 @@ async function saveReading() {
   saving = false;
   readingId = r.id;
   ownReading = true;
-  const now = ownWords();
-  if (now.question !== words.question || now.impression !== words.impression) sendEdits();
+  if (JSON.stringify(ownWords()) !== JSON.stringify(words)) sendEdits();
   update();
   startPolling();
 }
@@ -1565,7 +1815,7 @@ function saveCards() {
   const id = readingId, from = base, cards = placed.slice();
   if (!from) return;
   const body = JSON.stringify({
-    ...ownWords(), cards, reversed, rounds: rounds?.map(r => r.cards) ?? null, reshuffled: reshuffledOf(rounds), summary: readingText(), base: from,
+    ...ownWords(), cards, reversed, rounds: rounds?.map(r => r.cards) ?? null, reshuffled: reshuffledOf(rounds), clarify: drawnOnly(clarify, cards), summary: readingText(), base: from,
   });
   questionChain = questionChain
     .then(() => api(`readings/${id}`, { method: 'PATCH', body }))
@@ -1588,7 +1838,7 @@ function saveCards() {
 // The question and the first impression; both are saved the same way.
 let questionTimer = null;
 function onWordsInput() {
-  if (spread?.session) rounds[rounds.length - 1].question = $('question').value;
+  if (spread?.session) Object.assign(rounds[rounds.length - 1], { question: $('question').value, impression: $('impression').value });
   if (isDone()) history.replaceState(null, '', `#${shareHash()}`);
   keepLocal();
   if (!readingId || !verified) return;  // a save in progress picks the new words up when it lands
@@ -1643,13 +1893,15 @@ async function loadReading(id) {
     history.replaceState(null, '', link);
     return openSharedReading(new URLSearchParams(link.slice(3)));
   }
-  if (rounds) rounds = splitRounds(r.rounds, r.question, r.reshuffled);
+  if (rounds) rounds = splitRounds(r.rounds, r.question, r.reshuffled, r.impression);
   $('question').value = rounds ? rounds.at(-1).question : r.question;
-  $('impression').value = r.impression || '';
+  $('impression').value = rounds ? rounds.at(-1).impression : r.impression || '';
+  options = r.options || [];
+  clarify = r.clarify || {};
+  renderOptions();
   drawnAt = r.created_at;
-  interpretation = r.interpretation ? { text: r.interpretation, at: r.interpreted_at } : null;
-  earlier = r.earlier || [];
-  notes = r.notes || [];
+  journalState(r);
+  renderBoard();
   update();
   startPolling();
 }
@@ -1669,11 +1921,12 @@ function startPolling() {
     if (!isCurrent(g) || readingId !== id || !r.interpretation) return;
     if (interpretation && interpretation.at === r.interpreted_at && interpretation.text === r.interpretation) return;
     const first = !interpretation;
-    interpretation = { text: r.interpretation, at: r.interpreted_at };
+    interpretation = { text: r.interpretation, at: r.interpreted_at, by: r.interpreted_by };
     earlier = r.earlier || [];
     update();
-    toast(first ? "Claude's interpretation has arrived." : 'The interpretation was updated.');
-    if (first) $('interpretation').scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+    // Offered rather than scrolled to, so whatever is being done on the page is not taken away.
+    toast(first ? (r.interpreted_by === 'outside' ? 'An interpretation was added.' : "Claude's interpretation has arrived.") : 'The interpretation was updated.',
+      { label: 'Read it', run: viewInterpretation });
   }, 5000);
 }
 
@@ -1682,20 +1935,37 @@ function stopPolling() {
   pollTimer = null;
 }
 
+const viewInterpretation = () => $('interpretation').scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+
+// Where the reading on screen is kept, always in view: the journal (and so every device), only
+// this device, or nowhere but the page and its link.
+function saveState() {
+  if (!placed.length) return null;
+  const done = isDone();
+  if (readingId) {
+    if (!verified) return ['Checking the journal…'];
+    if (!base) return ['Saved to your journal · on your other devices too'];
+    return [done ? 'New cards kept on this device · journal not yet updated' : 'Being added to · kept on this device; the journal keeps the earlier cards meanwhile', true];
+  }
+  if (saving) return ['Saving to your journal…'];
+  if (!done) return ['In progress · kept on this device'];
+  if (journalOrigin) return [server.on ? 'Kept on this device · not yet in your journal' : 'Kept on this device · the journal is out of reach, it is saved once it can be reached', true];
+  return ['Public copy, no journal here · copy the reading or its link to keep it'];
+}
+
 function renderSaved() {
-  const note = $('savedNote');
-  const waiting = waitingForJournal();
-  note.hidden = !readingId && !waiting;
-  note.classList.toggle('waiting', waiting);
-  if (readingId) note.textContent = interpretation ? 'Saved in your journal.' : 'Saved in your journal. Ask Claude to interpret your latest reading, and it appears here.';
-  else if (waiting) note.textContent = 'Not yet saved to journal. It stays on this device and is saved once the journal can be reached.';
+  const note = $('savedNote'), state = saveState();
+  note.hidden = !state;
+  if (!state) return;
+  note.textContent = state[0];
+  note.classList.toggle('waiting', !!state[1]);
 }
 
 function renderInterpretation() {
   const box = $('interpretation');
   box.hidden = !interpretation;
   if (!interpretation) return;
-  $('interpretationMeta').textContent = `Claude · ${formatDate(interpretation.at)}`;
+  $('interpretationMeta').textContent = `${interpretation.by === 'outside' ? 'From another chat' : 'Claude'} · ${formatDate(interpretation.at)}`;
   $('interpretationText').innerHTML = renderMarkdown(interpretation.text);
   // Rebuilt only when it changes, so an open "Earlier version" stays open.
   const versions = $('earlierVersions');
@@ -1706,13 +1976,101 @@ function renderInterpretation() {
     const d = document.createElement('details');
     d.className = 'earlier';
     d.innerHTML = '<summary></summary><div class="earlier-text"></div>';
-    d.querySelector('summary').textContent = `Earlier version · ${formatDate(e.interpreted_at)}`;
+    d.querySelector('summary').textContent = `Earlier version${e.interpreted_by === 'outside' ? ', from another chat' : ''} · ${formatDate(e.interpreted_at)}`;
     d.querySelector('.earlier-text').innerHTML = renderMarkdown(e.text);
     return d;
   }));
 }
 
 // ---------- coming back to a reading ----------
+
+// What Batu is taking from a saved reading, and the day he wants to come back to it; and when
+// that day has come and nothing was noted since, a word at the top of the reading.
+function renderTakeaway() {
+  $('takeaway').hidden = !readingId || !server.on || !verified || !isDone();
+  document.querySelectorAll('#revisitChips .chip').forEach(c => c.setAttribute('aria-pressed',
+    String(c.dataset.days === '' ? !revisitOn : !!revisitOn && Number(c.dataset.days) === daysUntil(revisitOn))));
+  const due = revisitDue({ revisit_on: revisitOn, notes });
+  $('revisitBanner').hidden = !readingId || !due;
+  if (due) {
+    $('revisitWhen').textContent = `You wanted to come back to this ${revisitOn === localDay(Date.now()) ? 'today' : `on ${formatDate(revisitOn + 'T12:00')}`}.`;
+    $('revisitTook').textContent = takeaway.trim() ? `You were taking from it: ${takeaway.trim()}` : '';
+  }
+}
+
+// Due: its day has come, and no note was written on or after it.
+const revisitDue = r => !!r.revisit_on && r.revisit_on <= localDay(Date.now()) && !(r.notes || []).some(n => localDay(n.created_at) >= r.revisit_on);
+
+function daysUntil(day) {
+  return Math.round((new Date(day + 'T12:00') - new Date(localDay(Date.now()) + 'T12:00')) / 864e5);
+}
+
+let takeawayTimer = null;
+function onTakeawayInput() {
+  const g = gen, id = readingId;
+  takeaway = $('takeawayText').value;
+  clearTimeout(takeawayTimer);
+  takeawayTimer = setTimeout(() => {
+    takeawayTimer = null;
+    if (isCurrent(g) && readingId === id) sendTakeaway();
+  }, 700);
+}
+
+function sendTakeaway() {
+  const id = readingId;
+  questionChain = questionChain
+    .then(() => api(`readings/${id}`, { method: 'PATCH', body: JSON.stringify({ takeaway: takeaway.trim() }) }))
+    .catch(() => toast('Could not save what you are taking from this.', { label: 'Retry', run: () => { if (readingId === id) sendTakeaway(); } }));
+}
+
+function setRevisit(day) {
+  if (!readingId) return;
+  revisitOn = day;
+  $('revisitDate').value = day;
+  const id = readingId;
+  questionChain = questionChain
+    .then(() => api(`readings/${id}`, { method: 'PATCH', body: JSON.stringify({ revisit_on: day }) }))
+    .catch(() => toast('Could not save the day to come back.', { label: 'Retry', run: () => { if (readingId === id) setRevisit(revisitOn); } }));
+  renderTakeaway();
+}
+
+function plusDays(n) {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return localDay(d);
+}
+
+function writeWhatHappened() {
+  setNotePrompt('What actually happened?');
+  $('noteText').focus();
+  $('notes').scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth', block: 'center' });
+}
+
+// An interpretation from another chat, pasted in to keep with the reading; labelled as such.
+async function keepOutside() {
+  const text = $('outsideText').value.trim();
+  if (!text || !readingId) return;
+  const g = gen, id = readingId;
+  $('outsideSave').disabled = true;
+  let r;
+  try {
+    r = await api(`readings/${id}/interpretation`, { method: 'PUT', body: JSON.stringify({ text, by: 'outside' }) });
+  } catch {
+    if (isCurrent(g)) toast('Could not keep the interpretation.');
+    return;
+  } finally {
+    $('outsideSave').disabled = false;
+  }
+  if (!isCurrent(g) || readingId !== id) return;
+  journalState({ ...r, takeaway, revisit_on: revisitOn });
+  // Only what was sent is cleared; anything written meanwhile stays.
+  if ($('outsideText').value.trim() === text) {
+    $('outsideText').value = '';
+    $('keepOutside').open = false;
+  }
+  update();
+  toast('Kept with this reading.', { label: 'Read it', run: viewInterpretation });
+}
 
 let notePrompt = '';
 let addingNote = false;
@@ -1775,6 +2133,7 @@ async function deleteNote(n) {
   if (!isCurrent(g) || readingId !== id) return;
   notes = notes.filter(x => x !== n);
   renderNotes();
+  renderTakeaway();
   toast('Note deleted.', {
     label: 'Undo',
     run: async () => {
@@ -1787,8 +2146,33 @@ async function deleteNote(n) {
       if (!isCurrent(g) || readingId !== id) return;
       notes = [...notes, back].sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id - b.id));
       renderNotes();
+      renderTakeaway();
     },
   });
+}
+
+// The home page's quiet reminder: saved readings whose day to come back has come, from either deck.
+async function renderRevisits() {
+  const g = gen;
+  $('revisitBlock').hidden = true;
+  if (!server.on) return;
+  let due;
+  try {
+    due = (await api(`readings?revisit_by=${localDay(Date.now())}`)).filter(revisitDue);
+  } catch {
+    return;
+  }
+  if (!isCurrent(g) || $('pickerView').hidden || !due.length) return;
+  $('revisitList').replaceChildren(...due.map(r => {
+    const li = document.createElement('li');
+    li.innerHTML = '<a class="local-item"><span class="local-name"></span><span class="local-state"></span><span class="local-question"></span></a>';
+    li.querySelector('a').href = readingLink(r);
+    li.querySelector('.local-name').textContent = (findSpread(r.spread, readingDeck(r))?.name || r.spread) + (readingDeck(r) === D ? '' : ` · ${readingDeck(r).title}`);
+    li.querySelector('.local-state').textContent = `Drawn ${formatDate(r.created_at, { day: 'numeric', month: 'short' })}`;
+    li.querySelector('.local-question').textContent = r.takeaway ? `You were taking from it: ${r.takeaway}` : r.question.replace(/\n/g, ' · ');
+    return li;
+  }));
+  $('revisitBlock').hidden = false;
 }
 
 // `refresh` keeps the scroll position, for reloading the list in place after a delete.
@@ -1873,6 +2257,7 @@ function readingLink(r) {
   if (r.rounds) p.set('g', r.rounds.join('-'));
   if (r.reshuffled?.length) p.set('f', r.reshuffled.join('-'));
   if (r.question) p.set('q', r.question);
+  if (r.options?.length) p.set('o', r.options.join('\n'));
   p.set('id', r.id);
   return `#r?${p}`;
 }
@@ -2017,7 +2402,7 @@ function cardReadings(n, readings) {
   readings.filter(r => r.cards.includes(n)).forEach(r => {
     const i = r.cards.indexOf(n);
     const s = findSpread(r.spread);
-    const label = s?.variants[r.variant] && readingPositions(s, r.variant, r.cards, r.rounds?.map(cards => ({ cards })))[i]?.label;
+    const label = s?.variants[r.variant] && readingPositions(s, r.variant, r.cards, r.rounds?.map(cards => ({ cards })), r.options, r.clarify)[i]?.label;
     const li = document.createElement('li');
     li.innerHTML = '<a><span class="journal-date"></span><span class="card-readings-question"></span><span class="card-readings-position"></span></a>';
     li.querySelector('a').href = readingLink(r);
@@ -2052,23 +2437,32 @@ function localStamp(t) {
 }
 
 function currentReading() {
-  return { dk: D, spread, variant: variantIndex, cards: placed, reversed, rounds, ...ownWords(), date: drawnAt };
+  return { dk: D, spread, variant: variantIndex, cards: placed, reversed, rounds, ...ownWords(), clarify, date: drawnAt };
 }
 
+const oneLine = t => (t || '').replace(/\s+/g, ' ').trim();
+
 // `more`: the last question of a question-by-question reading can still get a clarifier; not
-// when the copy leaves out a question still being drawn for.
-function readingText({ dk, spread, variant: v, cards, reversed, rounds, question = '', impression = '', date, more = true } = currentReading()) {
+// when the copy leaves out a question still being drawn for. `ps`: positions already labelled,
+// for part of a sitting.
+function readingText({ dk, spread, variant: v, cards, reversed, rounds, question = '', impression = '', options: names = [], clarify: why = {}, date, more = true, ps } = currentReading()) {
   const variant = spread.variants[v];
-  const ps = readingPositions(spread, v, cards, rounds);
+  ps ??= readingPositions(spread, v, cards, rounds, names, why);
   const clarified = !rounds && ps.length > variant.positions.length;
   question = question.trim();
-  impression = impression.trim();
+  impression = rounds ? '' : impression.trim();
+  const seen = rounds ? rounds.some(r => oneLine(r.impression)) : !!impression;
+  const named = names.map(oneLine);
   const lines = [
     `${dk.title} reading, ${localDay(date || Date.now())}`,
     '',
     ...(rounds
-      ? ['Questions, in the order they were asked:', ...rounds.map((r, i) => `${r.n ?? i + 1}. ${r.question.replace(/\s+/g, ' ').trim() || '(none; read its cards as a general look at here and now)'}${r.fresh ? ' (before it, the deck was made whole again and reshuffled)' : ''}`)]
+      ? ['Questions, in the order they were asked:', ...rounds.flatMap((r, i) => [
+        `${r.n ?? i + 1}. ${oneLine(r.question) || '(none; read its cards as a general look at here and now)'}${r.fresh ? ' (before it, the deck was made whole again and reshuffled)' : ''}`,
+        ...(oneLine(r.impression) ? [`   My first impression of its cards, before reading their texts: ${oneLine(r.impression)}`] : []),
+      ])]
       : [`Question: ${question || '(none; read it as a general reading for here and now)'}`]),
+    ...(named.some(Boolean) ? ['', `The options: ${named.map((o, k) => `Option ${k + 1}, ${o || '(not named)'}`).join('; ')}.`] : []),
     ...(impression ? ['', `My first impression, written before reading the card texts: ${impression}`] : []),
     '',
     `Spread: ${spread.name}${variant.name ? ` (${variant.name})` : ''}`,
@@ -2097,7 +2491,7 @@ function readingText({ dk, spread, variant: v, cards, reversed, rounds, question
     'Please interpret this reading, as a conversation rather than a verdict. If the question is ' +
     'unclear, or you need more context about my situation to read the cards well, ask me first: ' +
     'a few short questions at a time, and wait for my answers before interpreting. ' +
-    (impression ? 'Start from my first impression: it is what I saw in the cards before any explanation. ' : '') +
+    (seen ? `Start from my first impression${rounds ? 's' : ''}: what I saw in the cards before any explanation. ` : '') +
     (rounds
       ? 'Answer the questions in the order they were asked, each from its own cards: its first three, ' +
         'then any clarifier, which was drawn to clarify or ground them. Keep each answer short, and say ' +
@@ -2136,14 +2530,18 @@ function sittingText(first, last, brief = false) {
   const rs = rounds.slice(first, last).map((r, i) => ({ ...r, n: first + i + 1 }));
   const count = rs.reduce((t, r) => t + r.cards, 0);
   const cards = placed.slice(at, at + count), rev = reversed?.slice(at, at + count) ?? null;
+  const ps = positions().slice(at, at + count);
   if (!brief) {
-    return readingText({ ...currentReading(), rounds: rs, cards, reversed: rev, more: last === rounds.length });
+    return readingText({ ...currentReading(), rounds: rs, cards, reversed: rev, ps, more: last === rounds.length });
   }
   return [
-    ...rs.map(r => `Question ${r.n}: ${r.question.replace(/\s+/g, ' ').trim() || '(none; read its cards as a general look at here and now)'}`),
+    ...rs.flatMap(r => [
+      `Question ${r.n}: ${oneLine(r.question) || '(none; read its cards as a general look at here and now)'}`,
+      ...(oneLine(r.impression) ? [`My first impression of its cards, before reading their texts: ${oneLine(r.impression)}`] : []),
+    ]),
     ...(rs.some(r => r.fresh) ? ['Before this question I made the deck whole again and reshuffled it.'] : []),
     '',
-    ...cardLines(D, sessionPositions(rs), cards, rev),
+    ...cardLines(D, ps, cards, rev),
     '',
     '---',
     '',
@@ -2157,11 +2555,11 @@ function clarifierText() {
   return [
     'A clarifier for the same reading:',
     '',
-    ...cardLines(D, readingPositions(spread, variantIndex, placed).slice(base), placed.slice(base), reversed?.slice(base) ?? null),
+    ...cardLines(D, positions().slice(base, placed.length), placed.slice(base), reversed?.slice(base) ?? null),
     '',
     '---',
     '',
-    'Read it as light on the spread as a whole, in the light of what you already said.',
+    `Read ${placed.length - base > 1 ? 'them' : 'it'} as light on the spread as a whole${Object.keys(clarify).some(i => i >= base) ? ', and on what I wanted clarified' : ''}, in the light of what you already said.`,
   ].join('\n');
 }
 
@@ -2169,6 +2567,9 @@ function clarifierText() {
 const completeRounds = () => rounds.length - (rounds.at(-1).cards < 3 ? 1 : 0);
 
 const copyQuestion = ri => copyText(sittingText(ri, ri + 1, true), `Question ${ri + 1} copied.`);
+
+// For Claude, who reads the journal itself: which reading to interpret.
+const copyRequest = () => copyText(`Please interpret my tarot reading ${readingId} from the journal.`, 'Request copied. Paste it to Claude.');
 
 function copyReading() {
   if (spread.session && !finished) return copyText(sittingText(0, completeRounds()), 'Reading so far copied.');
@@ -2224,10 +2625,24 @@ function openCard(n, positionIndex) {
   paragraphs($('detailText'), text);
   $('detailHeading').textContent = heading;
   paragraphs($('detailCommentary'), second);
+  // A card just drawn shows its picture first; its text waits until asked for, so the first
+  // look is your own. A sitting's earlier questions, and readings opened again, show it at once.
+  const hide = positionIndex != null && !meaningShown && positionIndex >= boardStartOfQuestion();
+  $('detailMeaning').hidden = hide;
+  $('detailShow').hidden = !hide;
   const dialog = $('cardDialog');
   if (!dialog.open) dialog.showModal();
   dialog.querySelector('.card-detail-text').scrollTop = 0;
   dialog.scrollTop = 0;
+}
+
+// Where the question at hand starts, or the spread.
+const boardStartOfQuestion = () => (spread?.session ? rounds.slice(0, -1).reduce((t, r) => t + r.cards, 0) : 0);
+
+function showMeaning() {
+  meaningShown = true;
+  $('detailMeaning').hidden = false;
+  $('detailShow').hidden = true;
 }
 
 function stepCard(delta) {
@@ -2379,15 +2794,38 @@ $('nextQuestionButton').addEventListener('click', nextQuestion);
 $('resetDeckButton').addEventListener('click', resetDeck);
 $('finishButton').addEventListener('click', finishSession);
 $('continueButton').addEventListener('click', reopen);
+$('clarifierButton').addEventListener('click', askClarifier);
+$('sittingToggle').addEventListener('click', toggleSitting);
+$('clarifyText').addEventListener('input', () => {
+  const t = $('clarifyText').value;
+  if (t.trim()) clarify[placed.length] = t;
+  else delete clarify[placed.length];
+  keepLocal();
+});
+$('copyMoreButton').addEventListener('click', () => sameChatCopy()?.run());
+$('copyRequestButton').addEventListener('click', copyRequest);
+$('viewInterpretation').addEventListener('click', viewInterpretation);
+$('outsideSave').addEventListener('click', keepOutside);
+$('takeawayText').addEventListener('input', onTakeawayInput);
+$('revisitDate').addEventListener('change', () => setRevisit($('revisitDate').value));
+document.querySelectorAll('#revisitChips .chip').forEach(c => {
+  c.addEventListener('click', () => setRevisit(c.dataset.days === '' ? '' : plusDays(Number(c.dataset.days))));
+});
+$('revisitWrite').addEventListener('click', writeWhatHappened);
+$('detailShow').addEventListener('click', showMeaning);
+$('askScores').addEventListener('click', () => {
+  $('askScores').textContent = $('askResult').classList.toggle('scores') ? 'Hide scores' : 'Show scores';
+});
+$('journalLink').addEventListener('click', e => {
+  if (server.on) return;
+  e.preventDefault();
+  toast('The journal cannot be reached right now. Readings are kept on this device until it can.');
+});
 document.querySelectorAll('#deckSwitch button').forEach(b => b.addEventListener('click', () => onDeckSwitch(b.dataset.deck)));
 $('copyButton').addEventListener('click', copyReading);
 $('linkButton').addEventListener('click', () => copyText(location.href, 'Link copied.'));
 $('undoButton').addEventListener('click', undo);
-$('resetButton').addEventListener('click', () => {
-  // Starting over on purpose: the unfinished reading need not be offered again.
-  if (localKey && !isDone()) dropLocal(localKey);
-  newReading();
-});
+$('resetButton').addEventListener('click', () => startOver('A new reading. The cards drawn went back to the deck.'));
 $('shuffleButton').addEventListener('click', shuffleDeck);
 $('cutButton').addEventListener('click', cutDeck);
 $('variantSelect').addEventListener('change', changeVariant);
@@ -2410,6 +2848,13 @@ document.querySelectorAll('#notePrompts .chip').forEach(c => {
 $('noteSave').addEventListener('click', addNote);
 $('journalSearch').addEventListener('input', () => renderJournalList());
 window.addEventListener('hashchange', () => route());
+// A takeaway still waiting for its debounce goes out as the page closes.
+window.addEventListener('pagehide', () => {
+  if (!takeawayTimer || !readingId) return;
+  clearTimeout(takeawayTimer);
+  takeawayTimer = null;
+  api(`readings/${readingId}`, { method: 'PATCH', body: JSON.stringify({ takeaway: takeaway.trim() }), keepalive: true }).catch(() => {});
+});
 new ResizeObserver(() => { if (spread) layoutFan(); }).observe($('fan'));
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {

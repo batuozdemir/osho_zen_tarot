@@ -52,6 +52,11 @@
         </div>
       </section>
 
+      <section class="home-block" id="revisitBlock" hidden>
+        <h2>You wanted to come back to</h2>
+        <ul class="local-list" id="revisitList"></ul>
+      </section>
+
       <section class="home-block" id="localBlock" hidden>
         <h2>On this device</h2>
         <ul class="local-list" id="localList"></ul>
@@ -71,6 +76,7 @@
         </label>
         <button class="ghost" id="askSubmit" type="submit">Submit</button>
         <ol class="ask-result" id="askResult"></ol>
+        <button class="link-button" id="askScores" type="button" hidden>Show scores</button>
       </form>
       <div class="spread-grid" id="spreadGrid"></div>
     </section>
@@ -85,6 +91,11 @@
         </details>
       </div>
 
+      <div class="revisit-banner" id="revisitBanner" hidden>
+        <p><span id="revisitWhen"></span> <span id="revisitTook"></span></p>
+        <button class="ghost" id="revisitWrite">What happened since?</button>
+      </div>
+
       <div class="reading">
         <div class="ask">
           <label class="field" id="variantField" hidden>
@@ -95,9 +106,12 @@
             <span id="questionLabel">Your question</span>
             <textarea id="question" rows="3" placeholder="What would you like to look at?"></textarea>
           </label>
+          <div class="field option-fields" id="optionFields" role="group" aria-label="Your options" hidden></div>
         </div>
 
         <div class="table">
+          <ol class="earlier-rounds" id="earlierRounds"></ol>
+          <button class="link-button sitting-toggle" id="sittingToggle" hidden>View the whole sitting</button>
           <div class="board" id="board"></div>
           <p class="status" id="status" aria-live="polite"></p>
           <div class="deck-controls" id="deckControls">
@@ -106,9 +120,14 @@
             <button class="ghost" id="resetDeckButton" hidden>Reset the deck</button>
             <button class="ghost reversals-button" id="reversalsButton" aria-pressed="false" hidden>Reversed cards: off</button>
           </div>
+          <label class="clarify-field" id="clarifyField" hidden>
+            <span>What needs clarifying?</span>
+            <input type="text" id="clarifyText" maxlength="1000" placeholder="Optional: a card, a tension, the whole answer">
+          </label>
           <div class="deck-controls" id="sessionControls" hidden>
+            <button class="ghost" id="clarifierButton">Draw a clarifier</button>
             <button class="ghost" id="nextQuestionButton">Next question</button>
-            <button class="ghost" id="finishButton">Finish</button>
+            <button class="ghost quiet" id="finishButton">Finish the sitting</button>
             <button class="ghost" id="continueButton" hidden>Continue the sitting</button>
           </div>
           <div class="fan" id="fan" aria-label="The deck, face down"></div>
@@ -116,17 +135,31 @@
 
         <aside class="panel">
           <label class="field" id="impressionField" hidden>
-            <span>Before reading the explanation: what catches your attention?</span>
+            <span id="impressionLabel">What do you notice, before reading the card texts?</span>
             <textarea id="impression" rows="3" placeholder="Optional, in your own words"></textarea>
           </label>
+          <section class="discuss" id="discuss" hidden>
+            <h2>Discuss this reading</h2>
+            <button class="primary" id="copyButton" data-goatcounter-click="Copy reading">Copy to start a chat</button>
+            <button class="ghost" id="copyMoreButton" hidden>Copy for the same chat</button>
+            <div class="claude-ask" id="claudeAsk" hidden>
+              <p>Saved to your journal, so Claude can read it there.</p>
+              <button class="ghost" id="copyRequestButton">Copy a request for Claude</button>
+              <button class="ghost" id="viewInterpretation" hidden>Read the interpretation</button>
+            </div>
+            <details class="keep-outside" id="keepOutside" hidden>
+              <summary>Keep an interpretation from another chat</summary>
+              <textarea id="outsideText" rows="5" placeholder="Paste the part you want to keep with this reading"></textarea>
+              <button class="ghost" id="outsideSave">Keep it here</button>
+            </details>
+          </section>
           <div class="actions">
-            <button class="primary" id="copyButton" disabled data-goatcounter-click="Copy reading">Copy reading</button>
+            <p class="saved-note" id="savedNote" hidden></p>
             <div class="actions-row">
               <button class="ghost" id="undoButton" disabled>Undo last card</button>
               <button class="ghost" id="resetButton">New reading</button>
             </div>
             <button class="ghost" id="linkButton" disabled>Copy link to this reading</button>
-            <p class="saved-note" id="savedNote" hidden></p>
           </div>
           <ol class="positions" id="positions"></ol>
         </aside>
@@ -139,6 +172,20 @@
         <div id="earlierVersions"></div>
       </section>
 
+      <section class="notes takeaway" id="takeaway" hidden>
+        <h2>What I'm taking from this</h2>
+        <textarea id="takeawayText" rows="2" placeholder="One thing to remember, a question, or something to try"></textarea>
+        <div class="revisit-row">
+          <label for="revisitDate">Come back to it</label>
+          <div class="note-prompts" id="revisitChips">
+            <button class="chip" data-days="7" aria-pressed="false">In a week</button>
+            <button class="chip" data-days="30" aria-pressed="false">In a month</button>
+            <button class="chip" data-days="" aria-pressed="false">No date</button>
+          </div>
+          <input type="date" id="revisitDate">
+        </div>
+      </section>
+
       <section class="notes" id="notes" hidden>
         <h2>Coming back to this</h2>
         <ol class="note-list" id="noteList"></ol>
@@ -146,6 +193,8 @@
           <button class="chip" aria-pressed="false">What stayed with me?</button>
           <button class="chip" aria-pressed="false">What looks different now?</button>
           <button class="chip" aria-pressed="false">What didn't fit?</button>
+          <button class="chip" aria-pressed="false">What did I try?</button>
+          <button class="chip" aria-pressed="false">What actually happened?</button>
         </div>
         <textarea id="noteText" rows="3" placeholder="A note for today"></textarea>
         <button class="ghost" id="noteSave">Add note</button>
@@ -178,9 +227,12 @@
         <p class="eyebrow" id="detailPosition"></p>
         <h2 id="detailName"></h2>
         <p class="suit" id="detailSuit"></p>
-        <div id="detailText"></div>
-        <h3 id="detailHeading">Commentary</h3>
-        <div id="detailCommentary"></div>
+        <button class="ghost" id="detailShow" hidden>Show the meaning</button>
+        <div id="detailMeaning">
+          <div id="detailText"></div>
+          <h3 id="detailHeading">Commentary</h3>
+          <div id="detailCommentary"></div>
+        </div>
       </div>
     </div>
   </dialog>

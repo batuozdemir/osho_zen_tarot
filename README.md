@@ -8,13 +8,28 @@ specific to the Osho guidebook (single card, three cards, Celtic Cross in Waite'
 horseshoe, decision). Both decks have "Question by Question": not a layout but a sitting, the
 way a reader works. Each question in turn gets three cards, then optional clarifiers (one more
 card that sheds light on the three, often drawn when they are all Major Arcana), all from
-the same deck without reshuffling, until the reading is finished by hand. Before a question's
+the same deck without reshuffling, until the reading is finished by hand. Once a question has
+its three cards the fan closes: "Draw a clarifier", "Next question" or "Finish the sitting"
+says what comes next, so another card is always drawn on purpose. While the sitting is open the
+board holds the question at hand; the earlier ones are rows above it with small cards and their
+Copy, and "View the whole sitting" lays them all out. Before a question's
 first card, "Reset the deck" makes the deck whole again and reshuffles it, so a card may come
-up again; the reading records before which questions that happened. A sitting can be copied
-before it is finished: "Copy reading" gives the questions so far with everything an outside
-assistant needs, including how the sitting works (it may ask for a clarifier for the last
-question), and the "Copy" on each question's tag above its cards, or beside it in the list,
-gives just that question and its cards, to paste into the same conversation.
+up again; the reading records before which questions that happened.
+
+Once a reading (or a sitting's question) has its cards, "Discuss this reading" offers "Copy to
+start a chat": the reading so far with everything an outside assistant needs, including how it
+works (it may ask for a clarifier, and a sitting goes on question by question). "Copy ... for
+the same chat" gives just what was added since, the latest question or the clarifiers, as do
+the Copy buttons on the board's tags. On the journal it also copies a request naming the reading
+for Claude, and keeps an interpretation pasted from another chat, labelled as such.
+
+Your own look comes first: once the cards are down (in a sitting, for each question) a field
+asks what you notice before reading the card texts, and a card just drawn opens on its picture,
+its text behind "Show the meaning". Before a clarifier is drawn, an optional line says what it
+should clarify; the copies and the journal carry it. Spreads whose positions name options
+(Decision Making, some three-card variations) get a name field per option, used in the
+positions and the copies. A line by the actions always says where the reading is kept: the
+journal, this device only, or nowhere but the page and its link (the public copy).
 
 Any complete reading can be taken up again, also one opened from the journal: "Continue the
 sitting" for more questions or clarifiers, "Draw a clarifier" for a fixed spread (one more
@@ -22,7 +37,8 @@ card under the spread, with its own Copy for the same conversation). A saved rea
 the journal meanwhile and is updated in place once it is complete again; while it is being
 added to it is kept on the device, so a reload resumes it. Undo takes back only what was
 added when Claude or Batu has already written about the reading (an interpretation or a
-note); otherwise the whole reading can be undone card by card. Rider-Waite readings can use reversed cards: a "Reversed cards"
+note); otherwise the whole reading can be undone card by card. Starting over (New reading, or a variation with other positions) while cards are drawn
+can be undone from its toast. Rider-Waite readings can use reversed cards: a "Reversed cards"
 button next to Shuffle turns them on before the first card, and each card then comes up
 upright or reversed at random.
 
@@ -31,8 +47,11 @@ the deck, pick cards from a face-down fan, and each card flies into its position
 the spread is complete, an optional field asks for a first impression before the card
 texts are read. A finished reading is saved to the journal (tailnet copy), where Claude
 can pick it up and interpret it without any copying; on the public copy it can be copied
-as plain text for any assistant. Under the interpretation, dated "coming back to this"
-notes can be added later.
+as plain text for any assistant. Under the interpretation, "What I'm taking from this" keeps
+one thing to remember with a day to come back to it (in a week, a month, or a date); once that
+day comes the home page lists the reading under "You wanted to come back to", and the reading
+itself asks what happened since, until a note is written. Dated "coming back to this" notes
+can be added any time.
 
 A reading in progress is kept in the browser's local storage, so a closed tab or a
 reload resumes it (the home page lists it under "On this device"). On the tailnet copy a
@@ -113,12 +132,12 @@ tailnet ACL decides who gets in.
 |---|---|---|---|
 | GET | `api/health` | | `{"ok": true, "jev": bool}`; `jev` is whether an OpenRouter key is set |
 | POST | `api/recommend` | `{"question", "deck"?, "spreads": {id: description}}` | Asks Jev which spread suits the question; returns `{"probabilities": {id: p}, "confidence"}`, the probabilities adding up to 1. 503 without a key, 502 when Jev does not answer |
-| GET | `api/readings` | | All readings, newest first (`?limit=n` for only the latest) |
+| GET | `api/readings` | | All readings, newest first (`?limit=n` for only the latest, `?revisit_by=YYYY-MM-DD` for those to come back to by that day) |
 | GET | `api/readings/{id}` | | One reading |
-| POST | `api/readings` | `{"deck"?, "spread", "variant", "question", "impression", "cards": [n, ...], "reversed"?, "rounds"?, "reshuffled"?, "summary", "created_at"?}` | Saves a finished reading; `deck` is `osho` (default) or `rws`, `reversed` one flag per card when reversals were in play, `rounds` the cards per question of a question-by-question reading, `reshuffled` the questions (from 0) before which its deck was made whole again, `created_at` when it was drawn, with the page's local offset so the id carries the local day |
-| PATCH | `api/readings/{id}` | `{"question"?, "impression"?, "summary"?, "cards"?, "reversed"?, "rounds"?, "reshuffled"?}` | Updates what Batu wrote (and the summary that quotes it), and the cards of a reading taken up again (`cards` comes with the other three as they now are); `PUT api/readings/{id}/question` is the old name |
+| POST | `api/readings` | `{"deck"?, "spread", "variant", "question", "impression", "cards": [n, ...], "reversed"?, "rounds"?, "reshuffled"?, "options"?, "clarify"?, "summary", "created_at"?}` | Saves a finished reading; `deck` is `osho` (default) or `rws`, `reversed` one flag per card when reversals were in play, `rounds` the cards per question of a question-by-question reading, `reshuffled` the questions (from 0) before which its deck was made whole again, `options` the names given to its options, `clarify` what clarifiers were drawn to clarify (`{card index: text}`), `created_at` when it was drawn, with the page's local offset so the id carries the local day |
+| PATCH | `api/readings/{id}` | `{"question"?, "impression"?, "options"?, "summary"?, "takeaway"?, "revisit_on"?, "cards"?, "reversed"?, "rounds"?, "reshuffled"?, "clarify"?, "base"?}` | Updates what Batu wrote (and the summary that quotes it), his takeaway and the day to come back (`YYYY-MM-DD`, or empty), and the cards of a reading taken up again: `cards` comes with `reversed`, `rounds`, `reshuffled` and `summary` as they now are, and `base`, the cards it started from (409 when the journal's differ); `PUT api/readings/{id}/question` is the old name |
 | GET | `api/readings/{id}/interpretation` | | The interpretation, its time and the earlier versions; what an open page polls |
-| PUT | `api/readings/{id}/interpretation` | `{"text"}` (Markdown) | Saves Claude's interpretation; a different text moves the previous one to `earlier`. An open page picks it up within seconds |
+| PUT | `api/readings/{id}/interpretation` | `{"text", "by"?}` (Markdown) | Saves Claude's interpretation (`by: "outside"`: one Batu pasted in from another chat); a different text moves the previous one to `earlier`. An open page picks it up within seconds |
 | POST | `api/readings/{id}/notes` | `{"prompt", "text"}` | Adds a dated "coming back to this" note |
 | DELETE | `api/readings/{id}/notes/{note_id}` | | Deletes a note (the page's Undo posts it again with its `created_at`) |
 | DELETE | `api/readings/{id}` | | Deletes a reading; it can be restored for 30 days, then it is purged (checked on every list, delete and restore) |
@@ -131,7 +150,10 @@ question-by-question reading's reshuffles. `reversed` is a list of
 booleans per card, or null when reversals were off. `rounds` is null except for a
 question-by-question reading (`spread: "session"`): the number of cards each question got,
 in order, the first three of each being its cards and any more its clarifiers; its
-`question` then holds every question, one line each. `summary` is the whole reading as
+`question` then holds every question, one line each, and its `impression` the first
+impression of each, the same way. `options` names a spread's options in order, `clarify`
+says what clarifiers were drawn to clarify, and `interpreted_by` (also on each `earlier`
+version) is `claude` or `outside`. `summary` is the whole reading as
 plain text: question, first impression, spread, a note on the deck, and every position
 with its card's full text (Osho's text and commentary, or the Rider-Waite meaning, with
 the reversed meaning first for a reversed card). It is the same text the "Copy reading" button
@@ -154,7 +176,8 @@ or asks Claude to do a reading:
    journal can be drawn on when a card or theme recurs (within the same deck: card
    numbers mean different cards in the two decks). If there is an `impression`, start from it: it is what Batu saw in the cards
    before any explanation. His `notes` say what stayed, what changed and what did not
-   fit when he came back to a reading; read them before a follow-up.
+   fit when he came back to a reading, and `takeaway` what he chose to take from it; read
+   them before a follow-up. An interpretation `by: "outside"` came from another chat.
 3. **Make it a conversation, not a verdict.** If the question is unclear, or the cards
    need more context about his situation to be read well, ask first: a few short
    questions at a time, then wait for the answers before interpreting.

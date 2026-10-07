@@ -157,6 +157,9 @@ main {
 
 .tile-name { font-size: 19px; }
 .tile-count { color: var(--muted); font-size: 15px; }
+/* What a spread is for, under its name where there is no hover to show it. */
+.tile-use-line { color: var(--muted); font-size: 14px; line-height: 1.3; margin-top: 4px; }
+@media (hover: hover) and (pointer: fine) { .tile-use-line { display: none; } }
 
 /* What the spread is and what it is for, over the tile on hover. Only where there is a
    real hover: on a touch screen it would turn the first tap into a hover instead of
@@ -209,7 +212,24 @@ main {
 }
 
 .ask-result a:hover { border-color: var(--gold); }
+.ask-text { display: flex; flex-direction: column; min-width: 0; }
+.ask-use { color: var(--muted); font-size: 15px; line-height: 1.3; }
 .ask-score { color: var(--gold); font-variant-numeric: tabular-nums; }
+/* The scores, and the bar behind each spread, only when asked for. */
+.ask-result:not(.scores) a { background: var(--surface); }
+.ask-result:not(.scores) .ask-score { display: none; }
+
+.link-button {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 15px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link-button:hover { color: var(--gold); }
 
 /* ---------- reading ---------- */
 
@@ -426,6 +446,41 @@ select:focus, textarea:focus { border-color: var(--gold); outline: none; }
 .pos-card { color: var(--gold); font-size: 17px; }
 
 .actions { display: flex; flex-direction: column; gap: 10px; }
+
+/* taking the reading to a chat */
+.discuss {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.discuss h2 { font-size: 19px; margin: 0; }
+.discuss > .ghost, .claude-ask .ghost { padding: 8px 12px; font-size: 16px; }
+.claude-ask { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.claude-ask p { margin: 0; color: var(--muted); font-size: 15px; }
+.keep-outside { border-top: 1px solid var(--line); padding-top: 10px; }
+.keep-outside summary { color: var(--muted); cursor: pointer; font-size: 15px; }
+.keep-outside summary:hover { color: var(--gold); }
+.keep-outside[open] { display: flex; flex-direction: column; gap: 8px; }
+.keep-outside[open] summary { margin-bottom: 2px; }
+.keep-outside .ghost { align-self: flex-start; padding: 6px 16px; font-size: 16px; }
+
+/* names for a spread's options */
+.option-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.option-fields input, .clarify-field input, input[type="date"] {
+  font: inherit;
+  font-size: 16px;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  min-width: 0;
+}
+.option-fields input:focus, .clarify-field input:focus, input[type="date"]:focus { border-color: var(--gold); outline: none; }
 .actions-row { display: flex; gap: 8px; }
 .actions-row .ghost { flex: 1; padding: 8px 12px; font-size: 16px; }
 
@@ -631,12 +686,41 @@ dialog::backdrop { background: rgba(5, 4, 8, 0.75); backdrop-filter: blur(3px); 
 .deck-controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; }
 .deck-controls .ghost { padding: 6px 18px; font-size: 16px; }
 .deck-controls .reversals-button.on { border-color: var(--gold); color: var(--gold); }
+.deck-controls .quiet { color: var(--muted); }
+
+.clarify-field { display: flex; flex-direction: column; gap: 4px; max-width: 460px; margin: 12px auto 0; }
+.clarify-field span { color: var(--muted); font-size: 15px; text-align: center; }
+
+/* question by question: the questions before the one at hand, a row each above the board */
+.earlier-rounds { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.earlier-rounds:empty { display: none; }
+.earlier-rounds li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 16px;
+}
+.earlier-q { color: var(--gold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.earlier-cards { display: flex; gap: 4px; }
+.earlier-card { padding: 0; border: 0; background: none; border-radius: 3px; }
+.earlier-card img { display: block; width: 30px; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 3px; }
+.earlier-card img.reversed { transform: rotate(180deg); }
+.earlier-card:hover img { box-shadow: 0 0 0 1px var(--gold); }
+.earlier-rounds .ghost { padding: 2px 12px; font-size: 14px; }
+.sitting-toggle { display: block; margin: 0 auto 10px; }
 
 /* question by question: each question heads its cards in the positions list */
 .positions .round-head { color: var(--gold); font-size: 16px; margin-top: 10px; list-style: none; overflow-wrap: anywhere; }
 .positions .round-head:first-child { margin-top: 0; }
 .positions .round-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .positions .round-head .ghost { flex: none; padding: 2px 12px; font-size: 14px; }
+.round-words, .round-seen { display: block; }
+.round-seen { color: var(--muted); font-style: italic; font-size: 15px; }
 .round-tag { position: absolute; z-index: 100; display: flex; align-items: center; gap: 10px; color: var(--gold); font-size: clamp(12px, 1.6vw, 15px); white-space: nowrap; }
 .round-tag .ghost { padding: 1px 10px; font-size: inherit; }
 .fan-card.leaving { opacity: 0; transition: opacity 0.4s, transform 0.35s ease; pointer-events: none; }
@@ -693,6 +777,29 @@ dialog::backdrop { background: rgba(5, 4, 8, 0.75); backdrop-filter: blur(3px); 
 .note-text { margin: 0; white-space: pre-wrap; max-width: 72ch; }
 
 .note-prompts { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.revisit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.revisit-row label { color: var(--muted); font-size: 15px; }
+input[type="date"] { padding: 4px 10px; font-size: 15px; color-scheme: dark; }
+
+.revisit-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+  margin: 0 0 18px;
+  padding: 12px 16px;
+  border: 1px solid var(--gold);
+  border-radius: 12px;
+  background: var(--gold-soft);
+}
+.revisit-banner p { margin: 0; max-width: 72ch; }
+#revisitTook { color: var(--muted); font-style: italic; }
+.revisit-banner .ghost { padding: 6px 16px; font-size: 16px; }
+
+#detailShow { margin: 4px 0 0; padding: 8px 20px; font-size: 16px; }
+.nav-link.offline { color: var(--muted); }
 
 .chip {
   border: 1px solid var(--line);
@@ -851,6 +958,7 @@ input[type="search"]:focus { border-color: var(--gold); outline: none; }
 }
 
 .local-item:hover { background: var(--surface-2); }
+a.local-item { color: inherit; text-decoration: none; }
 .local-name { font-size: 18px; }
 .local-state { color: var(--gold); font-size: 15px; }
 .local-question { flex-basis: 100%; color: var(--muted); font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -887,6 +995,8 @@ input[type="search"]:focus { border-color: var(--gold); outline: none; }
   /* While drawing, the deck stays at the bottom of the screen, so the question above and the
      deck below can both be reached without scrolling back and forth. */
   .fan:not(.closed) { position: sticky; bottom: 0; z-index: 120; background: linear-gradient(transparent, #121017 45%); }
+  /* a closed fan, a question at hand with its cards, takes no room from them */
+  .fan.closed { height: 0 !important; overflow: hidden; }
 }
 
 @media (max-width: 680px) {
